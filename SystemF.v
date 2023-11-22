@@ -5,6 +5,8 @@
 Set Warnings "-notation-overridden,-parsing,-deprecated-hint-without-locality".
 From Coq Require Import Strings.String.
 From SFN Require Import Maps.
+Require Import List.
+Import ListNotations.
 
 Hint Resolve update_eq : core.
 
@@ -15,7 +17,7 @@ Definition relation (X : Type) := X -> X -> Prop.
 Inductive multi {X : Type} (R : relation X) : relation X :=
 	| multi_refl : forall (x : X), multi R x x
 	| multi_step : forall (x y z : X),
-						R x y ->
+	R x y ->
 						multi R y z ->
 						multi R x z.
 
@@ -34,19 +36,25 @@ Module SystemF.
 (** ** Types *)
 
 Inductive ty : Type :=
-	| Ty_Bool  : ty
-	| Ty_Arrow : ty -> ty -> ty.
+	| Ty_Var   : string -> ty
+	| Ty_Unit  : ty
+	| Ty_Prod  : ty -> ty -> ty
+	| Ty_Arrow : ty -> ty -> ty
+	| Ty_Abs   : string -> ty -> ty.
 
 (* ================================================================= *)
 (** ** Terms *)
 
 Inductive tm : Type :=
 	| tm_var   : string -> tm
-	| tm_app   : tm -> tm -> tm
+	| tm_unit  : tm
+	| tm_pair  : tm -> tm -> tm
+	| tm_fst   : tm -> tm
+	| tm_snd   : tm -> tm
 	| tm_abs   : string -> ty -> tm -> tm
-	| tm_true  : tm
-	| tm_false : tm
-	| tm_if    : tm -> tm -> tm -> tm.
+	| tm_app   : tm -> tm -> tm
+	| tm_tyabs : tm -> tm
+	| tm_tyapp : tm -> tm.
 
 Declare Custom Entry sysf.
 Notation "<{ e }>" := e (e custom sysf at level 99).
@@ -59,20 +67,32 @@ Notation "\ x : t , y" :=
 						t custom sysf at level 99,
 						y custom sysf at level 99,
 						left associativity).
+
 Coercion tm_var : string >-> tm.
 
-Notation "'Bool'" := Ty_Bool (in custom sysf at level 0).
-Notation "'if' x 'then' y 'else' z" :=
-	(tm_if x y z) (in custom sysf at level 89,
+Notation "'\All' a '..' T" := (Ty_Abs a T) (in custom sysf at level 50, right associativity).
+Notation "x '_'" := (tm_tyapp x) (in custom sysf at level 1, left associativity).
+Notation "'/\' x" :=
+	(tm_tyabs x) (in custom sysf at level 90, x at level 99,
+						left associativity).
+
+Notation "'Unit'" := Ty_Unit (in custom sysf at level 0).
+Notation "'()'" := (tm_unit) (in custom sysf at level 0).
+
+Notation "'(~' S '*' T '~)'" := (Ty_Prod S T) (in custom sysf at level 50, right associativity).
+Notation "'(-' x ',' y '-)'" :=
+	(tm_pair x y) (in custom sysf at level 89,
 					x custom sysf at level 99,
 					y custom sysf at level 99,
-					z custom sysf at level 99,
 					left associativity).
-Notation "'true'"  := true (at level 1).
-Notation "'true'"  := tm_true (in custom sysf at level 0).
-Notation "'false'"  := false (at level 1).
-Notation "'false'"  := tm_false (in custom sysf at level 0).
-
+Notation "'fst' x" :=
+	(tm_fst x) (in custom sysf at level 89,
+					x custom sysf at level 99,
+					left associativity).
+Notation "'snd' x" :=
+	(tm_snd x) (in custom sysf at level 89,
+					x custom sysf at level 99,
+					left associativity).
 
 Definition x : string := "x".
 Definition y : string := "y".
@@ -82,19 +102,6 @@ Hint Unfold y : core.
 Hint Unfold z : core.
 
 
-Notation idB :=
-	<{\x:Bool, x}>.
-
-Notation idBB :=
-	<{\x:Bool->Bool, x}>.
-
-Notation idBBBB :=
-	<{\x:((Bool->Bool)->(Bool->Bool)), x}>.
-
-Notation k := <{\x:Bool, \y:Bool, x}>.
-
-Notation notB := <{\x:Bool, if x then false else true}>.
-
 (* ################################################################# *)
 (** * Operational Semantics *)
 
@@ -102,12 +109,17 @@ Notation notB := <{\x:Bool, if x then false else true}>.
 (** ** Values *)
 
 Inductive value : tm -> Prop :=
+	| v_unit :
+		value <{()}>
+	| v_pair :
+		forall v1 v2,
+		value v1 ->
+		value v2 ->
+		value <{(-v1, v2-)}>
 	| v_abs : forall x T2 t1,
 		value <{\x:T2, t1}>
-	| v_true :
-		value <{true}>
-	| v_false :
-		value <{false}>.
+	| v_tyabs : forall t,
+		value <{/\ t}>.
 
 Hint Constructors value : core.
 
@@ -118,24 +130,29 @@ Reserved Notation "'[' x ':=' s ']' t" (in custom sysf at level 20, x constr).
 
 Fixpoint subst (x : string) (s : tm) (t : tm) : tm :=
 	match t with
+	| <{()}> => <{()}>
 	| tm_var y =>
 		if String.eqb x y then s else t
 	| <{\y:T, t1}> =>
 		if String.eqb x y then t else <{\y:T, [x:=s] t1}>
 	| <{t1 t2}> =>
 		<{([x:=s] t1) ([x:=s] t2)}>
-	| <{true}> =>
-		<{true}>
-	| <{false}> =>
-		<{false}>
-	| <{if t1 then t2 else t3}> =>
-		<{if ([x:=s] t1) then ([x:=s] t2) else ([x:=s] t3)}>
+	| <{(- t1, t2 -) }> =>
+		<{(- [x:=s] t1, [x:=s] t2 -) }>
+	| <{fst t}> =>
+		<{fst [x:=s] t}>
+	| <{snd t}> =>
+		<{snd [x:=s] t}>
+	| <{/\ t}> =>
+		<{/\ [x:=s] t}>
+	| <{t _}> =>
+		<{([x:=s] t) _}>
 	end
 
 where "'[' x ':=' s ']' t" := (subst x s t) (in custom sysf).
 
 (* Example *)
-Check <{[x:=true] x}>.
+Check <{[x:=()] x}>.
 
 
 (** **** Exercise: 3 stars, standard (substi_correct)
@@ -164,15 +181,24 @@ Inductive substi (s : tm) (x : string) : tm -> tm -> Prop :=
 		substi s x t1 s1 ->
 		substi s x t2 s2 ->
 		substi s x (tm_app t1 t2) (tm_app s1 s2)
-	| s_true :
-		substi s x tm_true tm_true
-	| s_false :
-		substi s x tm_false tm_false
-	| s_if tif tthn tels sif sthn sels :
-		substi s x tif sif ->
-		substi s x tthn sthn ->
-		substi s x tels sels ->
-		substi s x (tm_if tif tthn tels) (tm_if sif sthn sels)
+	| s_unit :
+		substi s x tm_unit tm_unit
+	| s_pair t1 t2 s1 s2 :
+		substi s x t1 s1 ->
+		substi s x t2 s2 ->
+		substi s x (tm_pair t1 t2) (tm_pair s1 s2)
+	| s_fst t k :
+		substi s x t k ->
+		substi s x (tm_fst t) (tm_fst k)
+	| s_snd t k :
+		substi s x t k ->
+		substi s x (tm_snd t) (tm_snd k)
+	| s_tyabs t k :
+		substi s x t k ->
+		substi s x (tm_tyabs t) (tm_tyabs k)
+	| s_tyapp t k :
+		substi s x t k ->
+		substi s x (tm_tyapp t) (tm_tyapp k)
 .
 
 Hint Constructors substi : core.
@@ -181,12 +207,25 @@ Theorem substi_correct : forall s x t t',
 	<{ [x:=s]t }> = t' <-> substi s x t t'.
 Proof.
 	intros s x t t'. split; intros H.
-	- generalize dependent t'. induction t as [s'| |s'| | |];
-	intros; subst; cbn; auto; destruct (eqb_spec x s'); subst; auto.
+	- generalize dependent t'. induction t as [s'| |s'| | | | | |];
+	intros; subst; cbn; auto. destruct (eqb_spec x s'); subst; auto.
+	destruct (eqb_spec x s0); subst; auto.
 	- induction H; cbn; subst; try rewrite eqb_refl; 
 	try rewrite (proj2 (eqb_neq _ _)); auto.
 Qed.
 (** [] *)
+
+Fixpoint ty_subst (T : ty) (S : ty) (a : string): ty :=
+	match T with
+	| Ty_Var b =>
+		if String.eqb a b then S else T
+	| Ty_Unit => Ty_Unit
+	| Ty_Prod T1 T2 => Ty_Prod (ty_subst T1 S a) (ty_subst T2 S a)
+	| Ty_Arrow T1 T2 => Ty_Arrow (ty_subst T1 S a) (ty_subst T2 S a)
+	| Ty_Abs b T' =>
+		if String.eqb a b then T else (ty_subst T' S a)
+	end.
+
 
 (* ================================================================= *)
 (** ** Reduction *)
@@ -204,13 +243,26 @@ Inductive step : tm -> tm -> Prop :=
 			value v1 ->
 			t2 --> t2' ->
 			<{v1 t2}> --> <{v1  t2'}>
-	| ST_IfTrue : forall t1 t2,
-		<{if true then t1 else t2}> --> t1
-	| ST_IfFalse : forall t1 t2,
-		<{if false then t1 else t2}> --> t2
-	| ST_If : forall t1 t1' t2 t3,
-		t1 --> t1' ->
-		<{if t1 then t2 else t3}> --> <{if t1' then t2 else t3}>
+	| ST_Pair1 : forall t1 t1' t2,
+			t1 --> t1' ->
+			<{(- t1, t2 -)}> --> <{(- t1', t2 -)}>
+	| ST_Pair2 : forall v1 t2 t2',
+			value v1 ->
+			t2 --> t2' ->
+			<{(- v1, t2 -)}> --> <{(- v1, t2' -)}>
+	| ST_FstPair : forall v1 v2,
+		value v1 ->
+		value v2 ->
+		<{fst (- v1, v2 -)}> --> <{v1}>
+	| ST_SndPair : forall v1 v2,
+		value v1 ->
+		value v2 ->
+		<{snd (- v1, v2 -)}> --> <{v2}>
+	| ST_TyApp : forall t t',
+		t --> t' ->
+		<{t _}> --> <{t' _}>
+	| ST_TyAppTyAbs : forall t,
+		<{(/\ t) _}> --> <{t}>
 
 where "t '-->' t'" := (step t t').
 
@@ -219,246 +271,130 @@ Hint Constructors step : core.
 Notation multistep := (multi step).
 Notation "t1 '-->*' t2" := (multistep t1 t2) (at level 40).
 
-(* ================================================================= *)
-(** ** Examples *)
-
-Lemma step_example1 :
-	<{idBB idB}> -->* idB.
-Proof.
-	eapply multi_step.
-	apply ST_AppAbs.
-	apply v_abs.
-	simpl.
-	apply multi_refl.  Qed.
-
-Lemma step_example2 :
-	<{idBB (idBB idB)}> -->* idB.
-Proof.
-	eapply multi_step.
-	apply ST_App2. auto.
-	apply ST_AppAbs. auto.
-	eapply multi_step.
-	apply ST_AppAbs. simpl. auto.
-	simpl. apply multi_refl.  Qed.
-
-Lemma step_example3 :
-	<{idBB notB true}> -->* <{false}>.
-Proof.
-	eapply multi_step.
-	apply ST_App1. apply ST_AppAbs. auto. simpl.
-	eapply multi_step.
-	apply ST_AppAbs. auto. simpl.
-	eapply multi_step.
-	apply ST_IfTrue. apply multi_refl.  Qed.
-
-Lemma step_example4 :
-	<{idBB (notB true)}> -->* <{false}>.
-Proof.
-	eapply multi_step.
-	apply ST_App2. auto.
-	apply ST_AppAbs. auto. simpl.
-	eapply multi_step.
-	apply ST_App2. auto.
-	apply ST_IfTrue.
-	eapply multi_step.
-	apply ST_AppAbs. auto. simpl.
-	apply multi_refl.  Qed.
-
-(** We can use the [normalize] tactic defined in the [Smallstep] chapter
-	to simplify these proofs. *)
-
-Lemma step_example1' :
-	<{idBB idB}> -->* idB.
-Proof. normalize.  Qed.
-
-Lemma step_example2' :
-	<{idBB (idBB idB)}> -->* idB.
-Proof. normalize. Qed.
-
-Lemma step_example3' :
-	<{idBB notB true}> -->* <{false}>.
-Proof. normalize.  Qed.
-
-Lemma step_example4' :
-	<{idBB (notB true)}> -->* <{false}>.
-Proof. normalize.  Qed.
-
-(** **** Exercise: 2 stars, standard (step_example5)
-
-	Try to do this one both with and without [normalize]. *)
-
-Lemma step_example5 :
-		<{idBBBB idBB idB}>
-	-->* idB.
-Proof.
-	eapply multi_step. { apply ST_App1. apply ST_AppAbs. auto. }
-	cbn. eapply multi_step. { apply ST_AppAbs. auto. }
-	cbn. apply multi_refl.
-Qed.
-
-Lemma step_example5_with_normalize :
-		<{idBBBB idBB idB}>
-	-->* idB.
-Proof.
-	normalize.
-Qed.
-(** [] *)
 
 (* ################################################################# *)
 (** * Typing *)
 
+(* We define a notion of A being free in type T *)
+Inductive free : string -> ty -> Prop :=
+	| Free_Var : forall a, free a (Ty_Var a)
+	| Free_Unit : forall a, free a Ty_Unit
+	| Free_Prod1 : forall a T1 T2, 
+		free a T1 ->
+		free a (Ty_Prod T1 T2)
+	| Free_Prod2 : forall a T1 T2, 
+		free a T2 ->
+		free a (Ty_Prod T1 T2)
+	| Free_Arrow1 : forall a T1 T2,
+		free a T1 ->
+		free a (Ty_Arrow T1 T2)
+	| Free_Arrow2 : forall a T1 T2,
+		free a T2 ->
+		free a (Ty_Arrow T1 T2)
+	| Free_Tabs : forall a b T,
+		a <> b ->
+		free b T ->
+		free b (Ty_Abs a T).
+
+Inductive not_free : string -> ty -> Prop :=
+	| NotFree_Var : forall a b,
+		a <> b ->
+		not_free b (Ty_Var a)
+	| NotFree_Unit : forall a, not_free a Ty_Unit
+	| NotFree_Prod : forall a T1 T2, 
+		not_free a T1 ->
+		not_free a T2 ->
+		not_free a (Ty_Prod T1 T2)
+	| NotFree_Arrow : forall a T1 T2,
+		not_free a T1 ->
+		not_free a T2 ->
+		not_free a (Ty_Arrow T1 T2)
+	| NotFree_Abs : forall a T,
+		not_free a (Ty_Abs a T).
+
 (* ================================================================= *)
 (** ** Contexts *)
 
-(* TODO: Have both Type Context and Variable Context *)
-Definition context := partial_map ty.
+Definition varContext := partial_map ty.
+Definition typeCtxt := list string.
+
+Inductive free_varctxt : string -> varContext -> Prop :=
+	| FreeCtxt_Gamma : forall a Gamma x T,
+		Gamma x = Some T ->
+		free a T ->
+		free_varctxt a Gamma.
+
+Inductive not_free_varctxt : string -> varContext -> Prop :=
+	| NotFreeCtxt_Empty : forall a, not_free_varctxt a empty
+	| NotFreeCtxt_Gamma : forall a Gamma Gamma' x T,
+		Gamma = update Gamma' x T ->
+		not_free_varctxt a Gamma' ->
+		not_free a T ->
+		not_free_varctxt a Gamma.
 
 (* ================================================================= *)
 
-Reserved Notation "Gamma '|-' t '\in' T"
+Reserved Notation "Delta '|;' Gamma '|-' t ':' T"
 			(at level 101,
 				t custom sysf, T custom sysf at level 0).
 
-Inductive has_type : context -> tm -> ty -> Prop :=
-	| T_Var : forall Gamma x T1,
+Inductive has_type : typeCtxt -> varContext -> tm -> ty -> Prop :=
+	| T_Unit : forall Delta Gamma,
+		Delta |; Gamma |- () : Unit
+	| T_Var : forall Delta Gamma x T1,
 		Gamma x = Some T1 ->
-		Gamma |- x \in T1
-	| T_Abs : forall Gamma x T1 T2 t1,
-		x |-> T2 ; Gamma |- t1 \in T1 ->
-		Gamma |- \x:T2, t1 \in (T2 -> T1)
-	| T_App : forall T1 T2 Gamma t1 t2,
-		Gamma |- t1 \in (T2 -> T1) ->
-		Gamma |- t2 \in T2 ->
-		Gamma |- t1 t2 \in T1
-	| T_True : forall Gamma,
-		Gamma |- true \in Bool
-	| T_False : forall Gamma,
-		Gamma |- false \in Bool
-	| T_If : forall t1 t2 t3 T1 Gamma,
-		Gamma |- t1 \in Bool ->
-		Gamma |- t2 \in T1 ->
-		Gamma |- t3 \in T1 ->
-		Gamma |- if t1 then t2 else t3 \in T1
+		Delta |; Gamma |- x : T1
+	| T_Prod : forall Delta Gamma T1 T2 t1 t2,
+		Delta |; Gamma |- t1 : T1 ->
+		Delta |; Gamma |- t2 : T2 ->
+		Delta |; Gamma |- (- t1, t2 -) : (~ T1 * T2 ~)
+	| T_Fst : forall Delta Gamma T1 T2 t,
+		Delta |; Gamma |- t : ((~ T1 * T2 ~)) ->
+		Delta |; Gamma |- fst t : T1
+	| T_Snd : forall Delta Gamma T1 T2 t,
+		Delta |; Gamma |- t : ((~ T1 * T2 ~)) ->
+		Delta |; Gamma |- snd t : T2
+	| T_Abs : forall Delta Gamma x T1 T2 t1,
+		Delta |; (x |-> T2 ; Gamma) |- t1 : T1 ->
+		Delta |; Gamma |- \x:T2, t1 : (T2 -> T1)
+	| T_App : forall T1 T2 Delta Gamma t1 t2,
+		Delta |; Gamma |- t1 : (T2 -> T1) ->
+		Delta |; Gamma |- t2 : T2 ->
+		Delta |; Gamma |- t1 t2 : T1
+	| T_TLam : forall Delta Gamma a T t,
+		a :: Delta |; Gamma |- t : T ->
+		not_free_varctxt a Gamma ->
+		Delta |; Gamma |- /\ t : (\All a .. T)
+	| T_TApp : forall T T' Tsubst Delta Gamma t a,
+		Delta |; Gamma |- t : (\All a .. T) ->
+		Tsubst = ty_subst T T' a ->
+		Delta |; Gamma |- t _ : Tsubst
 
-where "Gamma '|-' t '\in' T" := (has_type Gamma t T).
+where "Delta '|;' Gamma '|-' t ':' T" := (has_type Delta Gamma t T).
 
 Hint Constructors has_type : core.
 
 (* ================================================================= *)
 (** ** Examples *)
 
-Example typing_example_1 :
-	empty |- \x:Bool, x \in (Bool -> Bool).
-Proof. eauto. Qed.
-
-Example typing_example_1' :
-	empty |- \x:Bool, x \in (Bool -> Bool).
-Proof. auto.  Qed.
-
-Example typing_example_2 :
-	empty |-
-	\x:Bool,
-		\y:Bool->Bool,
-			(y (y x)) \in
-	(Bool -> (Bool -> Bool) -> Bool).
-Proof. eauto 20. Qed.
-
-(** **** Exercise: 2 stars, standard, optional (typing_example_2_full)
-
-	Prove the same result without using [auto], [eauto], or
-	[eapply] (or [...]). *)
-
-Example typing_example_2_full :
-	empty |-
-	\x:Bool,
-		\y:Bool->Bool,
-			(y (y x)) \in
-	(Bool -> (Bool -> Bool) -> Bool).
-Proof.
-	constructor. constructor. apply T_App with Ty_Bool. 
-	{ constructor. cbn. reflexivity. }
-	apply T_App with Ty_Bool.
-	{ constructor. cbn. reflexivity. }
-	constructor. cbn. reflexivity.
-Qed.
-(** [] *)
-
-(** **** Exercise: 2 stars, standard (typing_example_3)
-
-	Formally prove the following typing derivation holds:
-
-	
-		empty |- \x:Bool->B, \y:Bool->Bool, \z:Bool,
-					y (x z)
-				\in T.
-*)
-
-Example typing_example_3 :
-	exists T,
-	empty |-
-		\x:Bool->Bool,
-			\y:Bool->Bool,
-			\z:Bool,
-				(y (x z)) \in
-		T.
-Proof.
-	eexists. do 3 constructor. apply T_App with Ty_Bool.
-	{ constructor. cbn. reflexivity. }
-	apply T_App with Ty_Bool.
-	{ constructor. cbn. reflexivity. }
-	constructor. cbn. reflexivity.
-Qed.
-(** [] *)
-
-(** We can also show that some terms are _not_ typable.  For example,
-	let's check that there is no typing derivation assigning a type
-	to the term [\x:Bool, \y:Bool, x y] -- i.e.,
-
-	~ exists T,
-		empty |- \x:Bool, \y:Bool, x y \in T.
-*)
-
-Example typing_nonexample_1 :
-	~ exists T,
-		empty |-
-		\x:Bool,
-			\y:Bool,
-				(x y) \in
-		T.
-Proof.
-	intros Hc. destruct Hc as [T Hc].
-	(* The [clear] tactic is useful here for tidying away bits of
-		the context that we're not going to need again. *)
-	inversion Hc; subst; clear Hc.
-	inversion H4; subst; clear H4.
-	inversion H5; subst; clear H5 H4.
-	inversion H2; subst; clear H2.
-	discriminate H1.
-Qed.
-
-(** **** Exercise: 3 stars, standard, optional (typing_nonexample_3)
-
-	Another nonexample:
-
-	~ (exists S T,
-			empty |- \x:S, x x \in T).
-*)
-
 Lemma ty_not_eq : forall T1 T2, ~ Ty_Arrow T2 T1 = T2.
 Proof.
 	induction T2; intros H.
 	- inversion H.
+	- inversion H.
+	- inversion H.
 	- inversion H; subst. apply IHT2_1. assumption.
+	- inversion H.
 Qed.
 
 Example typing_nonexample_3 :
 	~ (exists S T,
-		empty |-
-			\x:S, x x \in T).
+		[] |; empty |-
+			\x:S, x x : T).
 Proof.
-	intros [S [T H]]. inversion H; subst. inversion H5; subst.
-	inversion H3; subst. inversion H6; subst. rewrite H2 in H4. 
-	inversion H4; subst. apply (ty_not_eq T1 T2). assumption.
+	intros [S [T H]]. inversion H; subst. inversion H6; subst.
+	inversion H4; subst. inversion H7; subst. rewrite H3 in H5. 
+	inversion H5; subst. apply (ty_not_eq T1 T2). assumption.
 Qed.
 (** [] *)
 

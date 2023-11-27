@@ -51,7 +51,7 @@ Inductive tm : Type :=
 	| tm_pair  : tm -> tm -> tm
 	| tm_fst   : tm -> tm
 	| tm_snd   : tm -> tm
-	| tm_abs   : string -> ty -> tm -> tm
+	| tm_abs   : string -> tm -> tm
 	| tm_app   : tm -> tm -> tm
 	| tm_tyabs : tm -> tm
 	| tm_tyapp : tm -> tm.
@@ -62,9 +62,8 @@ Notation "( x )" := x (in custom sysf, x at level 99).
 Notation "x" := x (in custom sysf at level 0, x constr at level 0).
 Notation "S -> T" := (Ty_Arrow S T) (in custom sysf at level 50, right associativity).
 Notation "x y" := (tm_app x y) (in custom sysf at level 1, left associativity).
-Notation "\ x : t , y" :=
-	(tm_abs x t y) (in custom sysf at level 90, x at level 99,
-						t custom sysf at level 99,
+Notation "\ x , y" :=
+	(tm_abs x y) (in custom sysf at level 90, x at level 99,
 						y custom sysf at level 99,
 						left associativity).
 
@@ -116,8 +115,8 @@ Inductive value : tm -> Prop :=
 		value v1 ->
 		value v2 ->
 		value <{(-v1, v2-)}>
-	| v_abs : forall x T2 t1,
-		value <{\x:T2, t1}>
+	| v_abs : forall x t1,
+		value <{\x, t1}>
 	| v_tyabs : forall t,
 		value <{/\ t}>.
 
@@ -133,8 +132,8 @@ Fixpoint subst (x : string) (s : tm) (t : tm) : tm :=
 	| <{()}> => <{()}>
 	| tm_var y =>
 		if String.eqb x y then s else t
-	| <{\y:T, t1}> =>
-		if String.eqb x y then t else <{\y:T, [x:=s] t1}>
+	| <{\y, t1}> =>
+		if String.eqb x y then t else <{\y, [x:=s] t1}>
 	| <{t1 t2}> =>
 		<{([x:=s] t1) ([x:=s] t2)}>
 	| <{(- t1, t2 -) }> =>
@@ -171,12 +170,12 @@ Inductive substi (s : tm) (x : string) : tm -> tm -> Prop :=
 	| s_var2 y :
 		x <> y ->
 		substi s x y y
-	| s_abs1 T t :
-		substi s x (tm_abs x T t) (tm_abs x T t)
-	| s_abs2 y T t k :
+	| s_abs1 t :
+		substi s x (tm_abs x t) (tm_abs x t)
+	| s_abs2 y t k :
 		x <> y ->
 		substi s x t k ->
-		substi s x (tm_abs y T t) (tm_abs y T k)
+		substi s x (tm_abs y t) (tm_abs y k)
 	| s_app t1 t2 s1 s2 :
 		substi s x t1 s1 ->
 		substi s x t2 s2 ->
@@ -233,9 +232,9 @@ Fixpoint ty_subst (T : ty) (S : ty) (a : string): ty :=
 Reserved Notation "t '-->' t'" (at level 40).
 
 Inductive step : tm -> tm -> Prop :=
-	| ST_AppAbs : forall x T2 t1 v2,
+	| ST_AppAbs : forall x t1 v2,
 			value v2 ->
-			<{(\x:T2, t1) v2}> --> <{ [x:=v2]t1 }>
+			<{(\x, t1) v2}> --> <{ [x:=v2]t1 }>
 	| ST_App1 : forall t1 t1' t2,
 			t1 --> t1' ->
 			<{t1 t2}> --> <{t1' t2}>
@@ -354,9 +353,9 @@ Inductive has_type : typeCtxt -> varContext -> tm -> ty -> Prop :=
 	| T_Snd : forall Delta Gamma T1 T2 t,
 		Delta |; Gamma |- t : ((~ T1 * T2 ~)) ->
 		Delta |; Gamma |- snd t : T2
-	| T_Abs : forall Delta Gamma x T1 T2 t1,
-		Delta |; (x |-> T2 ; Gamma) |- t1 : T1 ->
-		Delta |; Gamma |- \x:T2, t1 : (T2 -> T1)
+	| T_Abs : forall Delta Gamma x T1 T2 t,
+		Delta |; (x |-> T1 ; Gamma) |- t : T2 ->
+		Delta |; Gamma |- \x, t : (T1 -> T2)
 	| T_App : forall T1 T2 Delta Gamma t1 t2,
 		Delta |; Gamma |- t1 : (T2 -> T1) ->
 		Delta |; Gamma |- t2 : T2 ->
@@ -388,13 +387,13 @@ Proof.
 Qed.
 
 Example typing_nonexample_3 :
-	~ (exists S T,
+	~ (exists T,
 		[] |; empty |-
-			\x:S, x x : T).
+			\x, x x : T).
 Proof.
-	intros [S [T H]]. inversion H; subst. inversion H6; subst.
-	inversion H4; subst. inversion H7; subst. rewrite H3 in H5. 
-	inversion H5; subst. apply (ty_not_eq T1 T2). assumption.
+	intros [T H]. inversion H; subst. inversion H5; subst.
+	inversion H4; subst. inversion H7; subst. rewrite H3 in H6. 
+	inversion H6; subst. apply (ty_not_eq T2 T3). assumption.
 Qed.
 (** [] *)
 

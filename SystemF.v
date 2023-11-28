@@ -423,4 +423,32 @@ Proof.
 Qed.
 (** [] *)
 
+
+(* ################################################################# *)
+(** * Logical Relations Model for Normalisation *)
+
+
+(* TODO: DEFINE LR *)
+
+
+(* ================================================================= *)
+(** ** Helper Lemmas *)
+
+
+(* TODO: STATE AND PROVE LogRel-Weaken, LogRel-Subst, AND LogRel-Seq-Weaken *)
+
+
+(* ################################################################# *)
+(** * Fundamental Theorem and Soundness *)
+
+
+Theorem normalisation: forall e T,
+	[] |; empty |- e : T ->
+	normalises e.
+Proof.
+	intros e T HT.
+	(* Apply fundamental theorem *)
+	Admitted.
+
+
 End SystemF.

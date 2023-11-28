@@ -28,7 +28,7 @@ Tactic Notation "normalize" :=
 	repeat (print_goal; eapply multi_step ;
 				[ (eauto 10; fail) | (instantiate; simpl)]);
 	apply multi_refl.
-						
+
 
 Module SystemF.
 
@@ -115,40 +115,40 @@ Inductive value : tm -> Prop :=
 		value v1 ->
 		value v2 ->
 		value <{(-v1, v2-)}>
-	| v_abs : forall x t1,
-		value <{\x, t1}>
-	| v_tyabs : forall t,
-		value <{/\ t}>.
+	| v_abs : forall x e,
+		value <{\x, e}>
+	| v_tyabs : forall e,
+		value <{/\ e}>.
 
 Hint Constructors value : core.
 
 (* ================================================================= *)
 (** ** Substitution *)
 
-Reserved Notation "'[' x ':=' s ']' t" (in custom sysf at level 20, x constr).
+Reserved Notation "'[' x ':=' s ']' e" (in custom sysf at level 20, x constr).
 
-Fixpoint subst (x : string) (s : tm) (t : tm) : tm :=
-	match t with
+Fixpoint subst (x : string) (s : tm) (e : tm) : tm :=
+	match e with
 	| <{()}> => <{()}>
 	| tm_var y =>
-		if String.eqb x y then s else t
-	| <{\y, t1}> =>
-		if String.eqb x y then t else <{\y, [x:=s] t1}>
-	| <{t1 t2}> =>
-		<{([x:=s] t1) ([x:=s] t2)}>
-	| <{(- t1, t2 -) }> =>
-		<{(- [x:=s] t1, [x:=s] t2 -) }>
-	| <{fst t}> =>
-		<{fst [x:=s] t}>
-	| <{snd t}> =>
-		<{snd [x:=s] t}>
-	| <{/\ t}> =>
-		<{/\ [x:=s] t}>
-	| <{t _}> =>
-		<{([x:=s] t) _}>
+		if String.eqb x y then s else e
+	| <{\y, e1}> =>
+		if String.eqb x y then e else <{\y, [x:=s] e1}>
+	| <{e1 e2}> =>
+		<{([x:=s] e1) ([x:=s] e2)}>
+	| <{(- e1, e2 -) }> =>
+		<{(- [x:=s] e1, [x:=s] e2 -) }>
+	| <{fst e1}> =>
+		<{fst [x:=s] e1}>
+	| <{snd e2}> =>
+		<{snd [x:=s] e2}>
+	| <{/\ e1}> =>
+		<{/\ [x:=s] e1}>
+	| <{e1 _}> =>
+		<{([x:=s] e1) _}>
 	end
 
-where "'[' x ':=' s ']' t" := (subst x s t) (in custom sysf).
+where "'[' x ':=' s ']' e" := (subst x s e) (in custom sysf).
 
 (* Example *)
 Check <{[x:=()] x}>.
@@ -170,43 +170,43 @@ Inductive substi (s : tm) (x : string) : tm -> tm -> Prop :=
 	| s_var2 y :
 		x <> y ->
 		substi s x y y
-	| s_abs1 t :
-		substi s x (tm_abs x t) (tm_abs x t)
-	| s_abs2 y t k :
+	| s_abs1 e :
+		substi s x (tm_abs x e) (tm_abs x e)
+	| s_abs2 y e k :
 		x <> y ->
-		substi s x t k ->
-		substi s x (tm_abs y t) (tm_abs y k)
-	| s_app t1 t2 s1 s2 :
-		substi s x t1 s1 ->
-		substi s x t2 s2 ->
-		substi s x (tm_app t1 t2) (tm_app s1 s2)
+		substi s x e k ->
+		substi s x (tm_abs y e) (tm_abs y k)
+	| s_app e1 e2 s1 s2 :
+		substi s x e1 s1 ->
+		substi s x e2 s2 ->
+		substi s x (tm_app e1 e2) (tm_app s1 s2)
 	| s_unit :
 		substi s x tm_unit tm_unit
-	| s_pair t1 t2 s1 s2 :
-		substi s x t1 s1 ->
-		substi s x t2 s2 ->
-		substi s x (tm_pair t1 t2) (tm_pair s1 s2)
-	| s_fst t k :
-		substi s x t k ->
-		substi s x (tm_fst t) (tm_fst k)
-	| s_snd t k :
-		substi s x t k ->
-		substi s x (tm_snd t) (tm_snd k)
-	| s_tyabs t k :
-		substi s x t k ->
-		substi s x (tm_tyabs t) (tm_tyabs k)
-	| s_tyapp t k :
-		substi s x t k ->
-		substi s x (tm_tyapp t) (tm_tyapp k)
+	| s_pair e1 e2 s1 s2 :
+		substi s x e1 s1 ->
+		substi s x e2 s2 ->
+		substi s x (tm_pair e1 e2) (tm_pair s1 s2)
+	| s_fst e k :
+		substi s x e k ->
+		substi s x (tm_fst e) (tm_fst k)
+	| s_snd e k :
+		substi s x e k ->
+		substi s x (tm_snd e) (tm_snd k)
+	| s_tyabs e k :
+		substi s x e k ->
+		substi s x (tm_tyabs e) (tm_tyabs k)
+	| s_tyapp e k :
+		substi s x e k ->
+		substi s x (tm_tyapp e) (tm_tyapp k)
 .
 
 Hint Constructors substi : core.
 
-Theorem substi_correct : forall s x t t',
-	<{ [x:=s]t }> = t' <-> substi s x t t'.
+Theorem substi_correct : forall s x e e',
+	<{ [x:=s]e }> = e' <-> substi s x e e'.
 Proof.
-	intros s x t t'. split; intros H.
-	- generalize dependent t'. induction t as [s'| |s'| | | | | |];
+	intros s x e e'. split; intros H.
+	- generalize dependent e'. induction e as [s'| |s'| | | | | |];
 	intros; subst; cbn; auto. destruct (eqb_spec x s'); subst; auto.
 	destruct (eqb_spec x s0); subst; auto.
 	- induction H; cbn; subst; try rewrite eqb_refl; 
@@ -229,26 +229,26 @@ Fixpoint ty_subst (T : ty) (S : ty) (a : string): ty :=
 (* ================================================================= *)
 (** ** Reduction *)
 
-Reserved Notation "t '-->' t'" (at level 40).
+Reserved Notation "e '-->' e'" (at level 40).
 
 Inductive step : tm -> tm -> Prop :=
-	| ST_AppAbs : forall x t1 v2,
-			value v2 ->
-			<{(\x, t1) v2}> --> <{ [x:=v2]t1 }>
-	| ST_App1 : forall t1 t1' t2,
-			t1 --> t1' ->
-			<{t1 t2}> --> <{t1' t2}>
-	| ST_App2 : forall v1 t2 t2',
+	| ST_AppAbs : forall x e v,
+			value v ->
+			<{(\x, e) v}> --> <{ [x:=v]e }>
+	| ST_App1 : forall e1 e1' e2,
+			e1 --> e1' ->
+			<{e1 e2}> --> <{e1' e2}>
+	| ST_App2 : forall v1 e2 e2',
 			value v1 ->
-			t2 --> t2' ->
-			<{v1 t2}> --> <{v1  t2'}>
-	| ST_Pair1 : forall t1 t1' t2,
-			t1 --> t1' ->
-			<{(- t1, t2 -)}> --> <{(- t1', t2 -)}>
-	| ST_Pair2 : forall v1 t2 t2',
+			e2 --> e2' ->
+			<{v1 e2}> --> <{v1  e2'}>
+	| ST_Pair1 : forall e1 e1' e2,
+			e1 --> e1' ->
+			<{(- e1, e2 -)}> --> <{(- e1', e2 -)}>
+	| ST_Pair2 : forall v1 e2 e2',
 			value v1 ->
-			t2 --> t2' ->
-			<{(- v1, t2 -)}> --> <{(- v1, t2' -)}>
+			e2 --> e2' ->
+			<{(- v1, e2 -)}> --> <{(- v1, e2' -)}>
 	| ST_FstPair : forall v1 v2,
 		value v1 ->
 		value v2 ->
@@ -257,19 +257,45 @@ Inductive step : tm -> tm -> Prop :=
 		value v1 ->
 		value v2 ->
 		<{snd (- v1, v2 -)}> --> <{v2}>
-	| ST_TyApp : forall t t',
-		t --> t' ->
-		<{t _}> --> <{t' _}>
-	| ST_TyAppTyAbs : forall t,
-		<{(/\ t) _}> --> <{t}>
+	| ST_TyApp : forall e e',
+		e --> e' ->
+		<{e _}> --> <{e' _}>
+	| ST_TyAppTyAbs : forall e,
+		<{(/\ e) _}> --> <{e}>
 
-where "t '-->' t'" := (step t t').
+where "e '-->' e'" := (step e e').
 
 Hint Constructors step : core.
 
 Notation multistep := (multi step).
-Notation "t1 '-->*' t2" := (multistep t1 t2) (at level 40).
+Notation "e1 '-->*' e2" := (multistep e1 e2) (at level 40).
 
+
+Definition normalises (e : tm) := exists v, value v /\ e -->* v.
+
+Example normalise_value : normalises (<{\x , x}>).
+Proof.
+	exists <{\x , x}>. split; auto.
+	normalize.
+Qed.
+
+Example normalise_fun : normalises (<{(\x , x) ()}>).
+Proof.
+	exists <{()}>. split; auto.
+	normalize.
+Qed.
+
+Example stuck : ~ normalises (<{fst () }>).
+Proof.
+	intros H. inversion H as [v [Hv Hstep]].
+	inversion Hstep.
+	- subst. inversion Hv.
+	- inversion H0.
+Qed.
+
+
+Definition normalises_pred (e : tm) (P : tm -> Prop) := 
+	exists v, value v /\ e -->* v /\ P v.
 
 (* ################################################################# *)
 (** * Typing *)
@@ -333,9 +359,9 @@ Inductive not_free_varctxt : string -> varContext -> Prop :=
 
 (* ================================================================= *)
 
-Reserved Notation "Delta '|;' Gamma '|-' t ':' T"
+Reserved Notation "Delta '|;' Gamma '|-' e ':' T"
 			(at level 101,
-				t custom sysf, T custom sysf at level 0).
+				e custom sysf, T custom sysf at level 0).
 
 Inductive has_type : typeCtxt -> varContext -> tm -> ty -> Prop :=
 	| T_Unit : forall Delta Gamma,
@@ -343,33 +369,33 @@ Inductive has_type : typeCtxt -> varContext -> tm -> ty -> Prop :=
 	| T_Var : forall Delta Gamma x T1,
 		Gamma x = Some T1 ->
 		Delta |; Gamma |- x : T1
-	| T_Prod : forall Delta Gamma T1 T2 t1 t2,
-		Delta |; Gamma |- t1 : T1 ->
-		Delta |; Gamma |- t2 : T2 ->
-		Delta |; Gamma |- (- t1, t2 -) : (~ T1 * T2 ~)
-	| T_Fst : forall Delta Gamma T1 T2 t,
-		Delta |; Gamma |- t : ((~ T1 * T2 ~)) ->
-		Delta |; Gamma |- fst t : T1
-	| T_Snd : forall Delta Gamma T1 T2 t,
-		Delta |; Gamma |- t : ((~ T1 * T2 ~)) ->
-		Delta |; Gamma |- snd t : T2
-	| T_Abs : forall Delta Gamma x T1 T2 t,
-		Delta |; (x |-> T1 ; Gamma) |- t : T2 ->
-		Delta |; Gamma |- \x, t : (T1 -> T2)
-	| T_App : forall T1 T2 Delta Gamma t1 t2,
-		Delta |; Gamma |- t1 : (T2 -> T1) ->
-		Delta |; Gamma |- t2 : T2 ->
-		Delta |; Gamma |- t1 t2 : T1
-	| T_TLam : forall Delta Gamma a T t,
-		a :: Delta |; Gamma |- t : T ->
+	| T_Prod : forall Delta Gamma T1 T2 e1 e2,
+		Delta |; Gamma |- e1 : T1 ->
+		Delta |; Gamma |- e2 : T2 ->
+		Delta |; Gamma |- (- e1, e2 -) : (~ T1 * T2 ~)
+	| T_Fst : forall Delta Gamma T1 T2 e,
+		Delta |; Gamma |- e : ((~ T1 * T2 ~)) ->
+		Delta |; Gamma |- fst e : T1
+	| T_Snd : forall Delta Gamma T1 T2 e,
+		Delta |; Gamma |- e : ((~ T1 * T2 ~)) ->
+		Delta |; Gamma |- snd e : T2
+	| T_Abs : forall Delta Gamma x T1 T2 e,
+		Delta |; (x |-> T1 ; Gamma) |- e : T2 ->
+		Delta |; Gamma |- \x, e : (T1 -> T2)
+	| T_App : forall T1 T2 Delta Gamma e1 e2,
+		Delta |; Gamma |- e1 : (T2 -> T1) ->
+		Delta |; Gamma |- e2 : T2 ->
+		Delta |; Gamma |- e1 e2 : T1
+	| T_TLam : forall Delta Gamma a T e,
+		a :: Delta |; Gamma |- e : T ->
 		not_free_varctxt a Gamma ->
-		Delta |; Gamma |- /\ t : (\All a .. T)
-	| T_TApp : forall T T' Tsubst Delta Gamma t a,
-		Delta |; Gamma |- t : (\All a .. T) ->
+		Delta |; Gamma |- /\ e : (\All a .. T)
+	| T_TApp : forall T T' Tsubst Delta Gamma e a,
+		Delta |; Gamma |- e : (\All a .. T) ->
 		Tsubst = ty_subst T T' a ->
-		Delta |; Gamma |- t _ : Tsubst
+		Delta |; Gamma |- e _ : Tsubst
 
-where "Delta '|;' Gamma '|-' t ':' T" := (has_type Delta Gamma t T).
+where "Delta '|;' Gamma '|-' e ':' T" := (has_type Delta Gamma e T).
 
 Hint Constructors has_type : core.
 

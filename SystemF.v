@@ -7,6 +7,7 @@ From Coq Require Import Strings.String.
 From SFN Require Import Maps.
 Require Import List.
 Import ListNotations.
+From Autosubst Require Export Autosubst.
 
 Hint Resolve update_eq : core.
 
@@ -27,25 +28,36 @@ Module SystemF.
 (** ** Types *)
 
 Inductive ty : Type :=
-	| Ty_Var   : string -> ty
+	| Ty_Var   : var -> ty
 	| Ty_Unit  : ty
 	| Ty_Prod  : ty -> ty -> ty
 	| Ty_Arrow : ty -> ty -> ty
-	| Ty_Abs   : string -> ty -> ty.
+	| Ty_Abs   : {bind ty} -> ty.
+
+Global Instance Ids_type : Ids ty. derive. Defined.
+Global Instance Rename_type : Rename ty. derive. Defined.
+Global Instance Subst_type : Subst ty. derive. Defined.
+Global Instance SubstLemmas_type : SubstLemmas ty. derive. Qed.
+
 
 (* ================================================================= *)
 (** ** Terms *)
 
 Inductive tm : Type :=
-	| tm_var   : string -> tm
+	| tm_var   : var -> tm
 	| tm_unit  : tm
 	| tm_pair  : tm -> tm -> tm
 	| tm_fst   : tm -> tm
 	| tm_snd   : tm -> tm
-	| tm_abs   : string -> tm -> tm
+	| tm_abs   : {bind tm} -> tm
 	| tm_app   : tm -> tm -> tm
 	| tm_tyabs : tm -> tm
 	| tm_tyapp : tm -> tm.
+
+Global Instance Ids_expr : Ids tm. derive. Defined.
+Global Instance Rename_expr : Rename tm. derive. Defined.
+Global Instance Subst_expr : Subst tm. derive. Defined.
+Global Instance SubstLemmas_expr : SubstLemmas tm. derive. Qed.
 
 Declare Custom Entry sysf.
 Notation "<{ e }>" := e (e custom sysf at level 99).
@@ -58,7 +70,7 @@ Notation "\ x , y" :=
 						y custom sysf at level 99,
 						left associativity).
 
-Coercion tm_var : string >-> tm.
+Coercion tm_var : var >-> tm.
 
 Notation "'\All' a '..' T" := (Ty_Abs a T) (in custom sysf at level 50, right associativity).
 Notation "x '_'" := (tm_tyapp x) (in custom sysf at level 1, left associativity).
@@ -106,8 +118,8 @@ Inductive value : tm -> Prop :=
 		value v1 ->
 		value v2 ->
 		value <{(-v1, v2-)}>
-	| v_abs : forall x e,
-		value <{\x, e}>
+	| v_abs : forall (e : tm),
+		value (tm_abs e)
 	| v_tyabs : forall e,
 		value <{/\ e}>.
 
@@ -116,7 +128,7 @@ Hint Constructors value : core.
 (* ================================================================= *)
 (** ** Substitution *)
 
-Reserved Notation "'[' x ':=' s ']' e" (in custom sysf at level 20, x constr).
+(* Reserved Notation "'[' x ':=' s ']' e" (in custom sysf at level 20, x constr).
 
 Fixpoint subst (x : string) (s : tm) (e : tm) : tm :=
 	match e with
@@ -214,7 +226,7 @@ Fixpoint ty_subst (T : ty) (S : ty) (a : string): ty :=
 	| Ty_Arrow T1 T2 => Ty_Arrow (ty_subst T1 S a) (ty_subst T2 S a)
 	| Ty_Abs b T' =>
 		if String.eqb a b then T else (ty_subst T' S a)
-	end.
+	end. *)
 
 
 (* ================================================================= *)
@@ -223,9 +235,9 @@ Fixpoint ty_subst (T : ty) (S : ty) (a : string): ty :=
 Reserved Notation "e '-->' e'" (at level 40).
 
 Inductive step : tm -> tm -> Prop :=
-	| ST_AppAbs : forall x e v,
+	| ST_AppAbs : forall e v,
 			value v ->
-			<{(\x, e) v}> --> <{ [x:=v]e }>
+			tm_app (tm_abs e) v --> e.[v/]
 	| ST_App1 : forall e1 e1' e2,
 			e1 --> e1' ->
 			<{e1 e2}> --> <{e1' e2}>
@@ -264,13 +276,13 @@ Notation "e1 '-->*' e2" := (multistep e1 e2) (at level 40).
 
 Definition normalises (e : tm) := exists v, value v /\ e -->* v.
 
-Example normalise_value : normalises (<{\x , x}>).
+Example normalise_value : normalises (tm_abs (tm_var 0)).
 Proof.
-	exists <{\x , x}>. split; auto.
+	exists (tm_abs (tm_var 0)). split; auto.
 	apply multi_refl.
 Qed.
 
-Example normalise_fun : normalises (<{(\x , x) ()}>).
+Example normalise_fun : normalises (tm_app (tm_abs (tm_var 0)) tm_unit).
 Proof.
 	exists <{()}>. split; auto.
 	eapply multi_step; auto.
@@ -281,7 +293,7 @@ Example stuck : ~ normalises (<{fst () }>).
 Proof.
 	intros H. inversion H as [v [Hv Hstep]].
 	inversion Hstep.
-	- subst. inversion Hv.
+	- subst. inversion Hv. 
 	- inversion H0.
 Qed.
 
@@ -293,7 +305,7 @@ Definition normalises_pred (e : tm) (P : tm -> Prop) :=
 (** * Typing *)
 
 (* We define a notion of A being free in type T *)
-Inductive free : string -> ty -> Prop :=
+(* Inductive free : var -> ty -> Prop :=
 	| Free_Var : forall a, free a (Ty_Var a)
 	| Free_Unit : forall a, free a Ty_Unit
 	| Free_Prod1 : forall a T1 T2, 
@@ -311,58 +323,58 @@ Inductive free : string -> ty -> Prop :=
 	| Free_Tabs : forall a b T,
 		a <> b ->
 		free b T ->
-		free b (Ty_Abs a T).
+		free b (Ty_Abs T). *)
 
 (* ================================================================= *)
 (** ** Contexts *)
 
-Definition varContext := partial_map ty.
-Definition typeCtxt := list string.
+Definition varContext := list ty.
+(* Definition typeCtxt := list ty. *)
 
-Definition free_varctxt (a : string) (Gamma : varContext) : Prop :=
+(* Definition free_varctxt (a : string) (Gamma : varContext) : Prop :=
 	exists x T,
 		Gamma x = Some T /\
-		free a T.
+		free a T. *)
 
 (* ================================================================= *)
 
-Reserved Notation "Delta '|;' Gamma '|-' e ':' T"
+Reserved Notation "Gamma '|-' e ':' T"
 			(at level 101,
 				e custom sysf, T custom sysf at level 0).
 
-Inductive has_type : typeCtxt -> varContext -> tm -> ty -> Prop :=
-	| T_Unit : forall Delta Gamma,
-		Delta |; Gamma |- () : Unit
-	| T_Var : forall Delta Gamma x T1,
+Inductive has_type : varContext -> tm -> ty -> Prop :=
+	| T_Unit : forall Gamma,
+		Gamma |- () : Unit
+	| T_Var : forall (Gamma: varContext) x T1,
 		Gamma x = Some T1 ->
-		Delta |; Gamma |- x : T1
-	| T_Prod : forall Delta Gamma T1 T2 e1 e2,
-		Delta |; Gamma |- e1 : T1 ->
-		Delta |; Gamma |- e2 : T2 ->
-		Delta |; Gamma |- (- e1, e2 -) : (~ T1 * T2 ~)
-	| T_Fst : forall Delta Gamma T1 T2 e,
-		Delta |; Gamma |- e : ((~ T1 * T2 ~)) ->
-		Delta |; Gamma |- fst e : T1
-	| T_Snd : forall Delta Gamma T1 T2 e,
-		Delta |; Gamma |- e : ((~ T1 * T2 ~)) ->
-		Delta |; Gamma |- snd e : T2
-	| T_Abs : forall Delta Gamma x T1 T2 e,
-		Delta |; (x |-> T1 ; Gamma) |- e : T2 ->
-		Delta |; Gamma |- \x, e : (T1 -> T2)
-	| T_App : forall T1 T2 Delta Gamma e1 e2,
-		Delta |; Gamma |- e1 : (T2 -> T1) ->
-		Delta |; Gamma |- e2 : T2 ->
-		Delta |; Gamma |- e1 e2 : T1
-	| T_TLam : forall Delta Gamma a T e,
-		a :: Delta |; Gamma |- e : T ->
+		Gamma |- x : T1
+	| T_Prod : forall Gamma T1 T2 e1 e2,
+		Gamma |- e1 : T1 ->
+		Gamma |- e2 : T2 ->
+		Gamma |- (- e1, e2 -) : (~ T1 * T2 ~)
+	| T_Fst : forall Gamma T1 T2 e,
+		Gamma |- e : ((~ T1 * T2 ~)) ->
+		Gamma |- fst e : T1
+	| T_Snd : forall Gamma T1 T2 e,
+		Gamma |- e : ((~ T1 * T2 ~)) ->
+		Gamma |- snd e : T2
+	| T_Abs : forall Gamma x T1 T2 e,
+		(x |-> T1 ; Gamma) |- e : T2 ->
+		Gamma |- \x, e : (T1 -> T2)
+	| T_App : forall T1 T2 Gamma e1 e2,
+		Gamma |- e1 : (T2 -> T1) ->
+		Gamma |- e2 : T2 ->
+		Gamma |- e1 e2 : T1
+	| T_TLam : forall Gamma a T e,
+		Gamma |- e : T ->
 		~ (free_varctxt a Gamma) ->
-		Delta |; Gamma |- /\ e : (\All a .. T)
-	| T_TApp : forall T T' Tsubst Delta Gamma e a,
-		Delta |; Gamma |- e : (\All a .. T) ->
+		Gamma |- /\ e : (\All a .. T)
+	| T_TApp : forall T T' Tsubst Gamma e a,
+		Gamma |- e : (\All a .. T) ->
 		Tsubst = ty_subst T T' a ->
-		Delta |; Gamma |- e _ : Tsubst
+		Gamma |- e _ : Tsubst
 
-where "Delta '|;' Gamma '|-' e ':' T" := (has_type Delta Gamma e T).
+where "Gamma '|-' e ':' T" := (has_type Gamma e T).
 
 Hint Constructors has_type : core.
 

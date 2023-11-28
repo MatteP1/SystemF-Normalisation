@@ -313,22 +313,6 @@ Inductive free : string -> ty -> Prop :=
 		free b T ->
 		free b (Ty_Abs a T).
 
-Inductive not_free : string -> ty -> Prop :=
-	| NotFree_Var : forall a b,
-		a <> b ->
-		not_free b (Ty_Var a)
-	| NotFree_Unit : forall a, not_free a Ty_Unit
-	| NotFree_Prod : forall a T1 T2, 
-		not_free a T1 ->
-		not_free a T2 ->
-		not_free a (Ty_Prod T1 T2)
-	| NotFree_Arrow : forall a T1 T2,
-		not_free a T1 ->
-		not_free a T2 ->
-		not_free a (Ty_Arrow T1 T2)
-	| NotFree_Abs : forall a T,
-		not_free a (Ty_Abs a T).
-
 (* ================================================================= *)
 (** ** Contexts *)
 
@@ -339,14 +323,6 @@ Definition free_varctxt (a : string) (Gamma : varContext) : Prop :=
 	exists x T,
 		Gamma x = Some T /\
 		free a T.
-
-Inductive not_free_varctxt : string -> varContext -> Prop :=
-	| NotFreeCtxt_Empty : forall a, not_free_varctxt a empty
-	| NotFreeCtxt_Gamma : forall a Gamma Gamma' x T,
-		Gamma = update Gamma' x T ->
-		not_free_varctxt a Gamma' ->
-		not_free a T ->
-		not_free_varctxt a Gamma.
 
 (* ================================================================= *)
 

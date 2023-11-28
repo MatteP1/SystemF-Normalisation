@@ -21,15 +21,6 @@ Inductive multi {X : Type} (R : relation X) : relation X :=
 						multi R y z ->
 						multi R x z.
 
-(* Normalise tactic *)
-Tactic Notation "print_goal" :=
-	match goal with |- ?x => idtac x end.
-Tactic Notation "normalize" :=
-	repeat (print_goal; eapply multi_step ;
-				[ (eauto 10; fail) | (instantiate; simpl)]);
-	apply multi_refl.
-
-
 Module SystemF.
 
 (* ================================================================= *)
@@ -276,13 +267,14 @@ Definition normalises (e : tm) := exists v, value v /\ e -->* v.
 Example normalise_value : normalises (<{\x , x}>).
 Proof.
 	exists <{\x , x}>. split; auto.
-	normalize.
+	apply multi_refl.
 Qed.
 
 Example normalise_fun : normalises (<{(\x , x) ()}>).
 Proof.
 	exists <{()}>. split; auto.
-	normalize.
+	eapply multi_step; auto.
+	apply multi_refl.
 Qed.
 
 Example stuck : ~ normalises (<{fst () }>).
@@ -343,11 +335,10 @@ Inductive not_free : string -> ty -> Prop :=
 Definition varContext := partial_map ty.
 Definition typeCtxt := list string.
 
-Inductive free_varctxt : string -> varContext -> Prop :=
-	| FreeCtxt_Gamma : forall a Gamma x T,
-		Gamma x = Some T ->
-		free a T ->
-		free_varctxt a Gamma.
+Definition free_varctxt (a : string) (Gamma : varContext) : Prop :=
+	exists x T,
+		Gamma x = Some T /\
+		free a T.
 
 Inductive not_free_varctxt : string -> varContext -> Prop :=
 	| NotFreeCtxt_Empty : forall a, not_free_varctxt a empty
@@ -388,7 +379,7 @@ Inductive has_type : typeCtxt -> varContext -> tm -> ty -> Prop :=
 		Delta |; Gamma |- e1 e2 : T1
 	| T_TLam : forall Delta Gamma a T e,
 		a :: Delta |; Gamma |- e : T ->
-		not_free_varctxt a Gamma ->
+		~ (free_varctxt a Gamma) ->
 		Delta |; Gamma |- /\ e : (\All a .. T)
 	| T_TApp : forall T T' Tsubst Delta Gamma e a,
 		Delta |; Gamma |- e : (\All a .. T) ->
@@ -427,9 +418,26 @@ Qed.
 (* ################################################################# *)
 (** * Logical Relations Model for Normalisation *)
 
+Definition predCtxt := partial_map Prop.
 
 (* TODO: DEFINE LR *)
 
+(* Fixpoint lr_val (Delta : typeCtxt) (xi : predCtxt) (t : ty) (v : tm) : Prop :=
+	match t with
+	| Ty_Var a =>
+		xi a
+	| Ty_Unit =>
+		v = <{()}>
+	| Ty_Prod T1 T2 =>
+		exists v1 v2,
+		v = <{(- v1, v2 -)}> /\
+		lr_val Delta xi T1 v1 /\
+		lr_val Delta xi T2 v2
+	| Ty_Arrow T1 T2 =>
+		True
+	| Ty_Abs a T =>
+		True
+	end. *)
 
 (* ================================================================= *)
 (** ** Helper Lemmas *)

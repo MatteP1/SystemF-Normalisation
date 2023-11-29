@@ -7,6 +7,7 @@ From Coq Require Import Strings.String.
 From SFN Require Import Maps.
 Require Import List.
 Import ListNotations.
+From stdpp Require Import gmap.
 From Autosubst Require Export Autosubst.
 
 Hint Resolve update_eq : core.
@@ -65,10 +66,10 @@ Notation "( x )" := x (in custom sysf, x at level 99).
 Notation "x" := x (in custom sysf at level 0, x constr at level 0).
 Notation "S -> T" := (Ty_Arrow S T) (in custom sysf at level 50, right associativity).
 Notation "x y" := (tm_app x y) (in custom sysf at level 1, left associativity).
-Notation "\ x , y" :=
+(* Notation "\ x , y" :=
 	(tm_abs x y) (in custom sysf at level 90, x at level 99,
 						y custom sysf at level 99,
-						left associativity).
+						left associativity). *)
 
 Coercion tm_var : var >-> tm.
 
@@ -212,7 +213,7 @@ Proof.
 	- generalize dependent e'. induction e as [s'| |s'| | | | | |];
 	intros; subst; cbn; auto. destruct (eqb_spec x s'); subst; auto.
 	destruct (eqb_spec x s0); subst; auto.
-	- induction H; cbn; subst; try rewrite eqb_refl; 
+	- induction H; cbn; subst; try rewrite eqb_refl;
 	try rewrite (proj2 (eqb_neq _ _)); auto.
 Qed.
 (** [] *)
@@ -232,7 +233,7 @@ Fixpoint ty_subst (T : ty) (S : ty) (a : string): ty :=
 (* ================================================================= *)
 (** ** Reduction *)
 
-Reserved Notation "e '-->' e'" (at level 40).
+Reserved Notation "e '-->' e'" (in custom sysf at level 40).
 
 Inductive step : tm -> tm -> Prop :=
 	| ST_AppAbs : forall e v,
@@ -293,12 +294,12 @@ Example stuck : ~ normalises (<{fst () }>).
 Proof.
 	intros H. inversion H as [v [Hv Hstep]].
 	inversion Hstep.
-	- subst. inversion Hv. 
+	- subst. inversion Hv.
 	- inversion H0.
 Qed.
 
 
-Definition normalises_pred (e : tm) (P : tm -> Prop) := 
+Definition normalises_pred (e : tm) (P : tm -> Prop) :=
 	exists v, value v /\ e -->* v /\ P v.
 
 (* ################################################################# *)
@@ -308,10 +309,10 @@ Definition normalises_pred (e : tm) (P : tm -> Prop) :=
 (* Inductive free : var -> ty -> Prop :=
 	| Free_Var : forall a, free a (Ty_Var a)
 	| Free_Unit : forall a, free a Ty_Unit
-	| Free_Prod1 : forall a T1 T2, 
+	| Free_Prod1 : forall a T1 T2,
 		free a T1 ->
 		free a (Ty_Prod T1 T2)
-	| Free_Prod2 : forall a T1 T2, 
+	| Free_Prod2 : forall a T1 T2,
 		free a T2 ->
 		free a (Ty_Prod T1 T2)
 	| Free_Arrow1 : forall a T1 T2,
@@ -346,8 +347,8 @@ Inductive has_type : varContext -> tm -> ty -> Prop :=
 	| T_Unit : forall Gamma,
 		Gamma |- () : Unit
 	| T_Var : forall (Gamma: varContext) x T1,
-		Gamma x = Some T1 ->
-		Gamma |- x : T1
+		nth_error Gamma x = Some T1 ->
+		has_type Gamma (tm_var x) T1
 	| T_Prod : forall Gamma T1 T2 e1 e2,
 		Gamma |- e1 : T1 ->
 		Gamma |- e2 : T2 ->
@@ -358,21 +359,19 @@ Inductive has_type : varContext -> tm -> ty -> Prop :=
 	| T_Snd : forall Gamma T1 T2 e,
 		Gamma |- e : ((~ T1 * T2 ~)) ->
 		Gamma |- snd e : T2
-	| T_Abs : forall Gamma x T1 T2 e,
-		(x |-> T1 ; Gamma) |- e : T2 ->
-		Gamma |- \x, e : (T1 -> T2)
+	| T_Abs : forall Gamma T1 T2 e,
+		(T1 :: Gamma) |- e : T2 ->
+		has_type Gamma (tm_abs e) (Ty_Arrow T1 T2)
 	| T_App : forall T1 T2 Gamma e1 e2,
 		Gamma |- e1 : (T2 -> T1) ->
 		Gamma |- e2 : T2 ->
 		Gamma |- e1 e2 : T1
-	| T_TLam : forall Gamma a T e,
-		Gamma |- e : T ->
-		~ (free_varctxt a Gamma) ->
-		Gamma |- /\ e : (\All a .. T)
-	| T_TApp : forall T T' Tsubst Gamma e a,
-		Gamma |- e : (\All a .. T) ->
-		Tsubst = ty_subst T T' a ->
-		Gamma |- e _ : Tsubst
+	| T_TLam : forall Gamma T e,
+		has_type (subst (ren (+1)) <$> Gamma) e T ->
+		has_type Gamma (tm_tyabs e) (Ty_Abs T)
+	| T_TApp : forall T T' Gamma e,
+		has_type Gamma e (Ty_Abs T) ->
+		has_type Gamma (tm_tyapp e) T.[T'/]
 
 where "Gamma '|-' e ':' T" := (has_type Gamma e T).
 
@@ -393,12 +392,11 @@ Qed.
 
 Example typing_nonexample_3 :
 	~ (exists T,
-		[] |; empty |-
-			\x, x x : T).
+		has_type [] (tm_abs (tm_app (tm_var 0) (tm_var 0))) T).
 Proof.
-	intros [T H]. inversion H; subst. inversion H5; subst.
-	inversion H4; subst. inversion H7; subst. rewrite H3 in H6. 
-	inversion H6; subst. apply (ty_not_eq T2 T3). assumption.
+	intros [T H]. inversion H; subst. inversion H2; subst.
+	inversion H4; subst. inversion H3; subst.
+	inversion H6; subst. inversion H5. apply (ty_not_eq T2 T3). assumption.
 Qed.
 (** [] *)
 
@@ -439,7 +437,7 @@ Definition predCtxt := partial_map Prop.
 
 
 Theorem normalisation: forall e T,
-	[] |; empty |- e : T ->
+	[] |- e : T ->
 	normalises e.
 Proof.
 	intros e T HT.

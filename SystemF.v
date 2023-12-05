@@ -57,10 +57,13 @@ Inductive tm : Type :=
 	| tm_tyabs : tm -> tm
 	| tm_tyapp : tm -> tm.
 
+
 Global Instance Ids_expr : Ids tm. derive. Defined.
 Global Instance Rename_expr : Rename tm. derive. Defined.
 Global Instance Subst_expr : Subst tm. derive. Defined.
 Global Instance SubstLemmas_expr : SubstLemmas tm. derive. Qed.
+
+Print Subst_expr.
 
 Declare Custom Entry sysf.
 Notation "<{ e }>" := e (e custom sysf at level 99).
@@ -413,12 +416,15 @@ Definition predCtxt := list (tm -> Prop).
 
 (* TODO: DEFINE LR *)
 
+Definition over_vals (P : tm -> Prop) : Prop :=
+	forall t, P t -> value t.
+
 Fixpoint lr_val (xi : predCtxt) (t : ty) (v : tm) : Prop :=
 	match t with
 	| Ty_Var a =>
 		match xi !! a with
 		| Some P => P v
-		| None => True
+		| None => False
 		end
 	| Ty_Unit =>
 		v = <{()}>
@@ -434,8 +440,35 @@ Fixpoint lr_val (xi : predCtxt) (t : ty) (v : tm) : Prop :=
 	| Ty_Abs T =>
 		exists e,
 		v = tm_tyabs e /\
-		(forall P, normalises_pred e (lr_val (P :: xi) T))
+		(forall P, over_vals P -> normalises_pred e (lr_val (P :: xi) T))
 	end.
+
+Lemma lr_val_val (xi : predCtxt) (T : ty) (v : tm) :
+	Forall over_vals xi -> lr_val xi T v -> value v.
+Proof.
+	revert xi v. induction T.
+	- intros xi v0 Hxi Hlr. simpl in Hlr.
+	  remember (xi !! v) as P.
+	  destruct P; try contradiction.
+	  symmetry in HeqP.
+	  destruct (elem_of_list_split_length xi v P HeqP) as (xi1 & xi2 & ? & ?).
+	  subst. clear HeqP.
+	  apply Forall_app in Hxi. destruct Hxi as [_ Hxi].
+	  inversion Hxi as [|? ? H1 H2]; subst.
+	  apply H1. assumption.
+	- intros xi v Hxi Hlr. simpl in Hlr. subst. auto.
+	- intros xi v Hxi Hlr. simpl in Hlr.
+	  destruct Hlr as [v1 [v2 [H1 [H2 H3]]]].
+	  apply IHT1 in H2; auto.
+	  apply IHT2 in H3; auto.
+	  subst; eauto.
+	- intros xi v Hxi Hlr. simpl in Hlr.
+	  destruct Hlr as [e [H1 H2]].
+	  subst. eauto.
+	- intros xi v Hxi Hlr. simpl in Hlr.
+	  destruct Hlr as [e [H1 H2]].
+	  subst. eauto.
+Qed.
 
 Fixpoint log_rel_seq (xi : predCtxt) (Gamma : varContext) (vs : list tm) : Prop :=
 	match Gamma with
@@ -460,14 +493,15 @@ Section Autosubst_Lemmas.
   Qed.
 End Autosubst_Lemmas.
 
-(* TODO: STATE AND PROVE LogRel-Weaken, LogRel-Subst, AND LogRel-Seq-Weaken *)
-
 Lemma log_rel_weaken_gen xi xi1 xi2 v T :
+	Forall over_vals xi ->
+	Forall over_vals xi1 ->
+	Forall over_vals xi2 ->
 	lr_val (xi1 ++ xi2) T v <->
 	lr_val (xi1 ++ xi ++ xi2) T.[upn (length xi1) (ren (+ length xi))] v.
 Proof.
-	revert xi xi1 xi2 v. induction T; simpl; auto; intros ?; simpl.
-	- split.
+	revert xi xi1 xi2 v. induction T; simpl; auto; intros xi xi1 xi2; simpl.
+	- intros v0 Hxi Hxi1 Hxi2. split.
 		+ rewrite iter_up; destruct (lt_dec v (length xi1)); simpl.
 			* rewrite (lookup_app_l _ xi2); auto;
 			  rewrite (lookup_app_l _ (xi ++ xi2)); auto.
@@ -482,7 +516,7 @@ Proof.
 			  assert (l: length xi1 + (length xi + (v - length xi1)) - (length xi1 + length xi) = v - length xi1) by lia.
 			  rewrite l.
 			  rewrite (lookup_app_r xi1); try lia; auto.
-	- split; intros H.
+	- intros v0 Hxi Hxi1 Hxi2. split; intro H.
 		+ destruct H as [v1 [v2 [H1 [H2 H3]]]].
 			exists v1, v2. 
 		 	split; auto.
@@ -490,61 +524,58 @@ Proof.
 		+ destruct H as [v1 [v2 [H1 [H2 H3]]]].
 			exists v1, v2. split; auto.
 			split; try rewrite (IHT1 xi); try rewrite (IHT2 xi); assumption.
-	- split; intros H.
+	- intros v0 Hxi Hxi1 Hxi2. split; intro H.
 		+ destruct H as [e [H1 H2]].
 			exists e. split; auto.
 			intros v' Hv'.
-			apply IHT1 in Hv'.
+			apply IHT1 in Hv'; auto.
 			apply H2 in Hv'.
-			unfold normalises_pred in Hv'.
 			destruct Hv' as [v'' [Hv'' [Hv''' Hv'''']]].
-			unfold normalises_pred.
 			exists v''.
 			split; auto; split; auto.
-			apply IHT2. assumption.
+			apply IHT2; assumption.
 		+ destruct H as [e [H1 H2]].
 			exists e. split; auto.
-			intros v' Hv'. rewrite IHT1 in Hv'.
-			apply H2 in Hv'.
-			unfold normalises_pred in Hv'.
-			destruct Hv' as [v'' [Hv'' [Hv''' Hv'''']]].
-			unfold normalises_pred.
+			intros v' Hv'.
+			assert (Hv'': lr_val (xi1 ++ xi ++ xi2) T1.[upn (length xi1) (ren (+length xi))] v').
+			apply IHT1; auto.
+			apply H2 in Hv''.
+			destruct Hv'' as [v'' [Hv'' [Hv''' Hv'''']]].
 			exists v''.
 			split; auto; split; auto.
 			rewrite (IHT2 xi); assumption.
-	- split; intros H.
+	- intros v0 Hxi Hxi1 Hxi2. split; intro H.
 		+ destruct H as [e [H1 H2]].
 			exists e. split; auto.
-			intros P.
-			specialize (H2 P).
-			unfold normalises_pred in H2.
-			destruct H2 as [v' [Hv' [Hv'' Hv''']]].
-			unfold normalises_pred.
+			intros P HP.
+			destruct (H2 P) as (v' & Hv' & Hv'' & Hv'''); auto.
 			exists v'.
 			split; auto; split; auto.
-			apply (IHT xi (P :: xi1)). assumption.
+			apply (IHT xi (P :: xi1)); auto.
 		+ destruct H as [e [H1 H2]].
 			exists e. split; auto.
-			intros P.
-			specialize (H2 P).
-			unfold normalises_pred in H2.
-			destruct H2 as [v' [Hv' [Hv'' Hv''']]].
-			unfold normalises_pred.
+		 	intros P HP.
+			destruct (H2 P) as (v' & Hv' & Hv'' & Hv'''); auto.
 			exists v'.
 			split; auto; split; auto.
-			apply (IHT xi (P :: xi1)). assumption.
+			apply (IHT xi (P :: xi1)); auto.
 Qed.
 
 Lemma log_rel_weaken xi P v T :
+	Forall over_vals xi ->
+	over_vals P ->
 	lr_val xi T v <-> lr_val (P :: xi) T.[ren (+1)] v.
 Proof.
+	intros Hxi HP.
 	apply log_rel_weaken_gen with (xi1 := []) (xi := [P]) (xi2 := xi); auto.
 Qed.
 
 Lemma log_rel_seq_weaken xi P Gamma vs :
+	Forall over_vals xi ->
+	over_vals P ->
 	log_rel_seq xi Gamma vs <-> log_rel_seq (P :: xi) (subst (ren (+1)) <$> Gamma) vs.
 Proof.
-	revert xi vs. induction Gamma; simpl; auto; intros; simpl.
+	revert xi vs. induction Gamma; simpl; auto; intros xi vs Hxi Hp; simpl.
 	split; intros.
 	- destruct H as [v [vs' [H1 [H2 H3]]]].
 		exists v, vs'. repeat (split; auto).
@@ -659,10 +690,21 @@ Fixpoint env_subst (vs : list tm) : var → tm :=
   end.
 
 Lemma subst_step_var Gamma x T vs xi:
+	Forall over_vals xi ->
 	Gamma !! x = Some T ->
 	log_rel_seq xi Gamma vs ->
 	normalises_pred (env_subst vs x) (lr_val xi T).
 Proof.
+	revert x vs T xi.
+	induction Gamma.
+	- done.
+	- intros x vs T xi Hxi Hx Hlrs.
+	  destruct x.
+	  * simpl in *. destruct Hlrs as (v & vs' & Hlr & ? & ?).
+	  	simplify_eq. simpl. exists v. split; auto.
+		eapply lr_val_val; eauto.
+	  * simpl in *. destruct Hlrs as (v & vs' & Hlr & ? & ?).
+	    simplify_eq.
 Admitted.
 
 Lemma subst_step_pair e1 v1 e2 v2 vs:
@@ -709,6 +751,7 @@ Proof.
 Admitted.
 
 Theorem fundamental_theorem : forall Gamma e vs T xi,
+	Forall over_vals xi ->
 	Gamma |- e : T ->
 	log_rel_seq xi Gamma vs ->
 	normalises_pred e.[env_subst vs] (lr_val xi T).
@@ -763,8 +806,10 @@ Theorem normalisation: forall e T,
 	normalises e.
 Proof.
 	intros e T HT.
-	(* Apply fundamental theorem *)
-	Admitted.
-
+	apply fundamental_theorem with (vs := []) (xi := []) in HT; cbn; auto.
+	unfold normalises_pred in HT.
+	asimpl in HT. destruct HT as [v [Hv [Hv' Hv'']]].
+	unfold normalises. eauto.
+Qed.
 
 End SystemF.

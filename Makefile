@@ -1,6 +1,6 @@
 COQMFFLAGS := -Q . SFN
 
-ALLVFILES := Maps.v
+ALLVFILES := SystemF.v
 
 build: Makefile.coq
 	$(MAKE) -f Makefile.coq

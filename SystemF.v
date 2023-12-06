@@ -4,13 +4,10 @@
 
 Set Warnings "-notation-overridden,-parsing,-deprecated-hint-without-locality".
 From Coq Require Import Strings.String.
-From SFN Require Import Maps.
 Require Import List.
 Import ListNotations.
 From stdpp Require Import gmap.
 From Autosubst Require Export Autosubst.
-
-Hint Resolve update_eq : core.
 
 (* Relation *)
 Definition relation (X : Type) := X -> X -> Prop.
@@ -62,8 +59,6 @@ Global Instance Ids_expr : Ids tm. derive. Defined.
 Global Instance Rename_expr : Rename tm. derive. Defined.
 Global Instance Subst_expr : Subst tm. derive. Defined.
 Global Instance SubstLemmas_expr : SubstLemmas tm. derive. Qed.
-
-Print Subst_expr.
 
 Declare Custom Entry sysf.
 Notation "<{ e }>" := e (e custom sysf at level 99).
@@ -144,6 +139,8 @@ Inductive eval_ctxt :=
 | AppRCtxt (K : eval_ctxt) (v: tm) (Hv: value v) : eval_ctxt
 | TAppCtxt (K : eval_ctxt) : eval_ctxt.
 
+Hint Constructors eval_ctxt : core.
+
 Fixpoint fill (K : eval_ctxt) (e : tm) : tm :=
 	match K with
 	| HoleCtxt => e
@@ -153,7 +150,7 @@ Fixpoint fill (K : eval_ctxt) (e : tm) : tm :=
 	| PairRCtxt K' v Hv => tm_pair v (fill K' e)
 	| AppLCtxt K' e' => tm_app (fill K' e) e'
 	| AppRCtxt K' v Hv => tm_app v (fill K' e)
-	| TAppCtxt K' => tm_tyabs (fill K' e)
+	| TAppCtxt K' => tm_tyapp (fill K' e)
 	end.
 
 Fixpoint compose (K K' : eval_ctxt) : eval_ctxt :=
@@ -196,6 +193,18 @@ Hint Constructors step : core.
 Notation multistep := (multi step).
 Notation "e1 '-->*' e2" := (multistep e1 e2) (at level 40).
 
+Lemma step_trans : forall e1 e2 e3,
+	e1 -->* e2 ->
+	e2 -->* e3 ->
+	e1 -->* e3.
+Proof.
+	intros e1 e2 e3 He1e2. 
+	induction He1e2 as [e | e e' e'' Hee' He'e'' IH].
+	- trivial.
+	- intros He''e3. apply IH in He''e3 as He'e3. 
+		apply multi_step with e'; assumption.
+Qed.
+
 Lemma fill_compose: forall e K K',
 	fill K (fill K' e) = fill (compose K K') e.
 Proof.
@@ -222,13 +231,37 @@ Proof.
 		+ assumption.
 Qed.
 
+Lemma eval_ctxt_hole: forall e,
+	<{ e }> = fill HoleCtxt <{ e }>.
+Proof. auto. Qed.
 
-Lemma step_trans : forall e1 e2 e3,
-	e1 -->* e2 ->
-	e2 -->* e3 ->
-	e1 -->* e3.
-Proof.
-Admitted.
+Lemma eval_ctxt_fst: forall e,
+	<{ fst e }> = fill (FstCtxt HoleCtxt) e.
+Proof. auto. Qed.
+
+Lemma eval_ctxt_snd: forall e,
+	<{ snd e }> = fill (SndCtxt HoleCtxt) e.
+Proof. auto. Qed.
+
+Lemma eval_ctxt_pair_left: forall e1 e2, 
+	<{ (- e1, e2 -) }> = fill (PairLCtxt HoleCtxt e2) e1.
+Proof. auto. Qed.
+
+Lemma eval_ctxt_pair_right: forall v1 e2 H,
+	<{(- v1, e2 -)}> = fill (PairRCtxt HoleCtxt v1 H) e2.
+Proof. auto. Qed.
+
+Lemma eval_ctxt_app_left: forall e1 e2,
+	tm_app e1 e2 = fill (AppLCtxt HoleCtxt e2) e1.
+Proof. auto. Qed.
+	
+Lemma eval_ctxt_app_right: forall v1 e2 H,
+	tm_app v1 e2 = fill (AppRCtxt HoleCtxt v1 H) e2.
+Proof. auto. Qed.
+
+Lemma eval_ctxt_tapp: forall e,
+	tm_tyapp e = fill (TAppCtxt HoleCtxt) e.
+Proof. auto. Qed.
 
 Definition normalises (e : tm) := exists v, value v /\ e -->* v.
 
@@ -342,14 +375,14 @@ Inductive has_type : varContext -> tm -> ty -> Prop :=
 	| T_Abs : forall Gamma T1 T2 e,
 		(T1 :: Gamma) |- e : T2 ->
 		has_type Gamma (tm_abs e) (Ty_Arrow T1 T2)
-	| T_App : forall T1 T2 Gamma e1 e2,
-		Gamma |- e1 : (T2 -> T1) ->
-		Gamma |- e2 : T2 ->
-		Gamma |- e1 e2 : T1
+	| T_App : forall Gamma T1 T2 e1 e2,
+		Gamma |- e1 : (T1 -> T2) ->
+		Gamma |- e2 : T1 ->
+		Gamma |- e1 e2 : T2
 	| T_TLam : forall Gamma T e,
 		has_type (subst (ren (+1)) <$> Gamma) e T ->
 		has_type Gamma (tm_tyabs e) (Ty_Abs T)
-	| T_TApp : forall T T' Gamma e,
+	| T_TApp : forall Gamma T T' e,
 		has_type Gamma e (Ty_Abs T) ->
 		has_type Gamma (tm_tyapp e) T.[T'/]
 
@@ -376,7 +409,7 @@ Example typing_nonexample_3 :
 Proof.
 	intros [T H]. inversion H; subst. inversion H2; subst.
 	inversion H4; subst. inversion H3; subst.
-	inversion H6; subst. inversion H5. apply (ty_not_eq T2 T3). assumption.
+	inversion H6; subst. inversion H5. apply (ty_not_eq T2 T0). assumption.
 Qed.
 (** [] *)
 
@@ -675,76 +708,75 @@ Proof.
 	    simplify_eq. cbn. apply IHG; assumption.
 Qed.
 
-Lemma ofc: forall e1 e2, 
-	<{ (- e1, e2 -) }> = fill (PairLCtxt HoleCtxt e2) e1.
-Proof. reflexivity. Qed.
-
-Lemma ofc2: forall v1 e2 H,
-	value v1 ->
-	<{(- v1, e2 -)}> = fill (PairRCtxt HoleCtxt v1 H) e2.
-Proof. auto. Qed.
-
-Lemma ofc3: forall e,
-	<{ fst e }> = fill (FstCtxt HoleCtxt) e.
-Proof. auto. Qed.
-
-Lemma ofc4: forall v1 v2,
-	value v1 ->
-	value v2 ->
-	<{ fst (- v1, v2 -) }> = fill HoleCtxt <{fst (- v1, v2 -)}>.
-Proof. auto. Qed.
-
-Lemma ofc_v: forall v,
-	value v ->
-	<{ v }> = fill HoleCtxt <{ v }>.
-Proof. auto. Qed.
-
-Lemma ofc3_2: forall e,
-	<{ snd e }> = fill (SndCtxt HoleCtxt) e.
-Proof. auto. Qed.
-
-Lemma ofc4_2: forall v1 v2,
-	value v1 ->
-	value v2 ->
-	<{ snd (- v1, v2 -) }> = fill HoleCtxt <{ snd (- v1, v2 -)}>.
-Proof. auto. Qed.
-
 Theorem fundamental_theorem : forall Gamma e T,
 	Gamma |- e : T ->
 	log_rel Gamma e T.
 Proof with auto.
 	unfold log_rel.
 	intros Gamma e T HGeT xi vs Hxi_val. revert vs xi Hxi_val.
-	induction HGeT; intros vs xi Hxi_val Hlrs_xi_G_vs.
+	induction HGeT as [ Gamma x T HxGamma | Gamma 
+					  | Gamma T1 T2 e1 e2 HGe1T1 IH1 HGe2T2 IH2 
+					  | Gamma T1 T2 e HGeT1T2 IH 
+					  | Gamma T1 T2 e HGeT1T2 IH
+					  | Gamma T1 T2 e HGeT2 IH
+					  | Gamma T1 T2 e1 e2 HGe1T1T2 IH1 HGe2T2 IH2
+					  | Gamma T e HGeT IH
+					  | Gamma T T' e HGeAT IH].
+	all: intros vs xi Hxi_val Hlrs_xi_G_vs;
+	asimpl. (* The asimpl performs the substitution in the goals*)
 	- apply subst_step_var with Gamma; assumption.
-	- asimpl. exists tm_unit; done.
-	- asimpl. rewrite ofc. apply norm_bind with (lr_val xi T1).
-		split. apply IHHGeT1...
+	- exists tm_unit; done.
+	- rewrite eval_ctxt_pair_left. apply norm_bind with (lr_val xi T1).
+		split. apply IH1...
 		intros v1 (Hv1val & Hlrv_v1). cbn.
-		rewrite ofc2 with _ _ Hv1val...
+		rewrite eval_ctxt_pair_right with _ _ Hv1val...
 		apply norm_bind with (lr_val xi T2).
-		split. apply IHHGeT2...
+		split. apply IH2...
 		intros v2 (Hv2val & Hlrv_v2).
 		apply norm_val; cbn; auto.
 		exists v1, v2...
-	- asimpl. rewrite ofc3. apply norm_bind with (lr_val xi (Ty_Prod T1 T2)).
-		split. apply IHHGeT...
+	- rewrite eval_ctxt_fst. apply norm_bind with (lr_val xi (Ty_Prod T1 T2)).
+		split. apply IH...
 		intros v (Hvval & Hlrv_v).
 		destruct Hlrv_v as (v1 & v2 & Heq & Hlrv_v1 & Hlrv_v2).
 		subst. inversion Hvval; subst. apply norm_step with v1. split; cbn.
-		+ rewrite ofc4, ofc_v...
+		+ rewrite (eval_ctxt_hole <{fst (- v1, v2 -)}>). 
+			rewrite (eval_ctxt_hole v1). auto.
 		+ apply norm_val...
-	- asimpl. rewrite ofc3_2. apply norm_bind with (lr_val xi (Ty_Prod T1 T2)).
-		split. apply IHHGeT...
+	- rewrite eval_ctxt_snd. apply norm_bind with (lr_val xi (Ty_Prod T1 T2)).
+		split. apply IH...
 		intros v (Hvval & Hlrv_v).
 		destruct Hlrv_v as (v1 & v2 & Heq & Hlrv_v1 & Hlrv_v2).
 		subst. inversion Hvval; subst. apply norm_step with v2. split; cbn.
-		+ rewrite ofc4_2, ofc_v...
+		+ rewrite (eval_ctxt_hole <{snd (- v1, v2 -)}>). 
+			rewrite (eval_ctxt_hole v2). auto.
 		+ apply norm_val...
-	- 
-	-
-	-
-	-
+	- apply norm_val... exists (e.[up (env_subst vs)]); split...
+		intros v' Hlrv_v'. asimpl. 
+		assert (Hes: v' .: env_subst vs = env_subst (v' :: vs))... 
+		rewrite Hes. apply IH... cbn. exists v', vs...
+	- rewrite eval_ctxt_app_left. 
+		apply norm_bind with (lr_val xi (Ty_Arrow T1 T2)).
+		split. apply IH1...
+		intros v1 (Hv1val & Hlrv_v1). destruct Hlrv_v1 as (e & Heq & H); subst.
+		cbn. rewrite eval_ctxt_app_right with _ _ Hv1val...
+		apply norm_bind with (lr_val xi T1). split. apply IH2...
+		intros v2 (Hv2val & Hlrv_v2). apply norm_step with e.[v2/]. split.
+		+ cbn. rewrite (eval_ctxt_hole (tm_app (tm_abs e) v2)). 
+			rewrite eval_ctxt_hole. auto.
+		+ apply (H v2 Hlrv_v2).
+	- apply norm_val... exists (e.[env_subst vs]). split...
+		intros P HovP. apply IH... apply log_rel_seq_weaken...
+	- rewrite eval_ctxt_tapp. apply norm_bind with (lr_val xi (Ty_Abs T)).
+		split. apply IH...
+		intros v (Hvval & Hlrv_v). destruct Hlrv_v as (e' & Heq & H); subst.
+		apply norm_step with e'. split.
+		+ cbn. rewrite (eval_ctxt_hole <{(/\ e') _}>). 
+			rewrite (eval_ctxt_hole e'). auto.
+		+ apply norm_mono with (lr_val ( (lr_val xi T' ) :: xi) T).
+			* intros v. apply log_rel_subst...
+			* apply (H (lr_val xi T')). intros v Hlrv_v. 
+				apply (lr_val_val xi T')...
 Qed.
 
 Theorem normalisation: forall e T,
@@ -752,10 +784,9 @@ Theorem normalisation: forall e T,
 	normalises e.
 Proof.
 	intros e T HT.
-	apply fundamental_theorem with (vs := []) (xi := []) in HT; cbn; auto.
-	unfold normalises_pred in HT.
-	asimpl in HT. destruct HT as [v [Hv [Hv' Hv'']]].
-	unfold normalises. eauto.
+	apply fundamental_theorem in HT. unfold log_rel in HT.
+	specialize HT with [] []. asimpl in HT. destruct HT as (v & Hvval & Hev & Hlrv_v).
+	1,2: done. exists v. split; done.
 Qed.
 
 End SystemF.

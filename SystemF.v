@@ -156,6 +156,18 @@ Fixpoint fill (K : eval_ctxt) (e : tm) : tm :=
 	| TAppCtxt K' => tm_tyabs (fill K' e)
 	end.
 
+Fixpoint compose (K K' : eval_ctxt) : eval_ctxt :=
+	match K with
+	| HoleCtxt => K'
+	| FstCtxt K'' => FstCtxt (compose K'' K')
+	| SndCtxt K'' => SndCtxt (compose K'' K')
+	| PairLCtxt K'' e2 => PairLCtxt (compose K'' K') e2
+	| PairRCtxt K'' v Hv => PairRCtxt (compose K'' K') v Hv
+	| AppLCtxt K'' e' => AppLCtxt (compose K'' K') e'
+	| AppRCtxt K'' v Hv => AppRCtxt (compose K'' K') v Hv
+	| TAppCtxt K'' => TAppCtxt (compose K'' K')
+	end.
+
 (* ================================================================= *)
 (** ** Reduction *)
 
@@ -181,6 +193,33 @@ Hint Constructors step : core.
 
 Notation multistep := (multi step).
 Notation "e1 '-->*' e2" := (multistep e1 e2) (at level 40).
+
+Lemma fill_compose: forall e K K',
+	fill K (fill K' e) = fill (compose K K') e.
+Proof.
+	intros e K. revert e. induction K; intros; cbn; try rewrite IHK; auto.
+Qed.
+
+Lemma eval_ctxt_step: forall e e' K,
+	e --> e' ->
+	fill K e --> fill K e'.
+Proof.
+	intros e e' K Hee'.
+	inversion Hee' as [K' e1 e2 Hred HK'e1 HK'e2].
+	do 2 (rewrite fill_compose). apply Step_nh. assumption.
+Qed.
+
+Lemma eval_ctxt_steps: forall e e' K,
+	e -->* e' ->
+	fill K e -->* fill K e'.
+Proof.
+	intros e e' K Hee'. induction Hee'.
+	- apply multi_refl.
+	- apply multi_step with (fill K y0).
+		+ apply eval_ctxt_step. assumption.
+		+ assumption.
+Qed.
+
 
 Lemma step_trans : forall e1 e2 e3,
 	e1 -->* e2 ->
@@ -214,6 +253,53 @@ Qed.
 
 Definition normalises_pred (e : tm) (P : tm -> Prop) :=
 	exists v, value v /\ e -->* v /\ P v.
+
+
+Lemma norm_mono e P Q:
+	(forall v, P v -> Q v) ->
+	normalises_pred e P ->
+	normalises_pred e Q.
+Proof.
+	intros HPQ HNeP. unfold normalises_pred in *.
+	destruct HNeP as [v' [Hv'val [Hev' HPv']]].
+	exists v'. auto.
+Qed.
+
+Lemma norm_val v P:
+	value v ->
+	P v->
+	normalises_pred v P.
+Proof.
+	intros Hvval HPv. unfold normalises_pred in *.
+	exists v. auto.
+Qed.
+
+Lemma norm_bind e P Q K: 
+	normalises_pred e Q /\
+	(forall v , value v /\ Q v -> normalises_pred (fill K v) P) ->
+	normalises_pred (fill K e) P.
+Proof.
+	intros [HNeQ HQNP]. unfold normalises_pred in HNeQ.
+	destruct HNeQ as (v_e & Hveval & Hev_e & HQv_e).
+	specialize HQNP with v_e.
+	assert (HNKveP: normalises_pred (fill K v_e) P); auto.
+	destruct HNKveP as (v_f & Hvfval & HKvevf & HPvf).
+	exists v_f. split. assumption. split; try assumption.
+	apply step_trans with (fill K v_e).
+	- apply eval_ctxt_steps. assumption.
+	- assumption.
+Qed.
+
+Lemma norm_step e e' P:
+	e --> e' /\ normalises_pred e' P ->
+	normalises_pred e P.
+Proof.
+	intros (Hee' & HNe'P). destruct HNe'P as (v' & Hv'val & He'v' & HPv').
+	exists v'. split. assumption. split; try assumption.
+	apply step_trans with e'.
+	- apply multi_step with e'; done.
+	- assumption.
+Qed.
 
 (* ################################################################# *)
 (** * Typing *)
@@ -554,25 +640,6 @@ Lemma log_rel_subst xi T T' v :
 	lr_val xi T.[T'/] v <-> lr_val ((lr_val xi T') :: xi) T v.
 Proof.
 	intro Hxi_val. apply log_rel_subst_gen with (xi' := []) (xi := xi); auto.
-Qed.
-
-Lemma norm_mono e P Q:
-	(forall v, P v -> Q v) ->
-	normalises_pred e P ->
-	normalises_pred e Q.
-Proof.
-	intros H1 H2. unfold normalises_pred in *.
-	destruct H2 as [v [? [? ?]]].
-	exists v. repeat (split; auto).
-Qed.
-
-Lemma norm_val v P:
-	value v ->
-	P v->
-	normalises_pred v P.
-Proof.
-	intros H1 H2. unfold normalises_pred in *.
-	exists v. repeat (split; auto).
 Qed.
 
 (* ################################################################# *)

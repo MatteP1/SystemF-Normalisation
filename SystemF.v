@@ -132,145 +132,48 @@ Inductive value : tm -> Prop :=
 Hint Constructors value : core.
 
 (* ================================================================= *)
-(** ** Substitution *)
+(** ** Evaluation Contexts *)
 
-(* Reserved Notation "'[' x ':=' s ']' e" (in custom sysf at level 20, x constr).
+Inductive eval_ctxt :=
+| HoleCtxt	: eval_ctxt
+| FstCtxt (K : eval_ctxt) : eval_ctxt
+| SndCtxt (K : eval_ctxt) : eval_ctxt
+| PairLCtxt (K : eval_ctxt) (e: tm) : eval_ctxt
+| PairRCtxt (K : eval_ctxt) (v: tm) (Hv: value v) : eval_ctxt
+| AppLCtxt (K : eval_ctxt) (e: tm) : eval_ctxt
+| AppRCtxt (K : eval_ctxt) (v: tm) (Hv: value v) : eval_ctxt
+| TAppCtxt (K : eval_ctxt) : eval_ctxt.
 
-Fixpoint subst (x : string) (s : tm) (e : tm) : tm :=
-	match e with
-	| <{()}> => <{()}>
-	| tm_var y =>
-		if String.eqb x y then s else e
-	| <{\y, e1}> =>
-		if String.eqb x y then e else <{\y, [x:=s] e1}>
-	| <{e1 e2}> =>
-		<{([x:=s] e1) ([x:=s] e2)}>
-	| <{(- e1, e2 -) }> =>
-		<{(- [x:=s] e1, [x:=s] e2 -) }>
-	| <{fst e1}> =>
-		<{fst [x:=s] e1}>
-	| <{snd e2}> =>
-		<{snd [x:=s] e2}>
-	| <{/\ e1}> =>
-		<{/\ [x:=s] e1}>
-	| <{e1 _}> =>
-		<{([x:=s] e1) _}>
-	end
-
-where "'[' x ':=' s ']' e" := (subst x s e) (in custom sysf).
-
-(* Example *)
-Check <{[x:=()] x}>.
-
-
-(** **** Exercise: 3 stars, standard (substi_correct)
-
-	The definition that we gave above uses Coq's [Fixpoint] facility
-	to define substitution as a _function_.  Suppose, instead, we
-	wanted to define substitution as an inductive _relation_ [substi].
-	We've begun the definition by providing the [Inductive] header and
-	one of the constructors; your job is to fill in the rest of the
-	constructors and prove that the relation you've defined coincides
-	with the function given above. *)
-
-Inductive substi (s : tm) (x : string) : tm -> tm -> Prop :=
-	| s_var1 :
-		substi s x (tm_var x) s
-	| s_var2 y :
-		x <> y ->
-		substi s x y y
-	| s_abs1 e :
-		substi s x (tm_abs x e) (tm_abs x e)
-	| s_abs2 y e k :
-		x <> y ->
-		substi s x e k ->
-		substi s x (tm_abs y e) (tm_abs y k)
-	| s_app e1 e2 s1 s2 :
-		substi s x e1 s1 ->
-		substi s x e2 s2 ->
-		substi s x (tm_app e1 e2) (tm_app s1 s2)
-	| s_unit :
-		substi s x tm_unit tm_unit
-	| s_pair e1 e2 s1 s2 :
-		substi s x e1 s1 ->
-		substi s x e2 s2 ->
-		substi s x (tm_pair e1 e2) (tm_pair s1 s2)
-	| s_fst e k :
-		substi s x e k ->
-		substi s x (tm_fst e) (tm_fst k)
-	| s_snd e k :
-		substi s x e k ->
-		substi s x (tm_snd e) (tm_snd k)
-	| s_tyabs e k :
-		substi s x e k ->
-		substi s x (tm_tyabs e) (tm_tyabs k)
-	| s_tyapp e k :
-		substi s x e k ->
-		substi s x (tm_tyapp e) (tm_tyapp k)
-.
-
-Hint Constructors substi : core.
-
-Theorem substi_correct : forall s x e e',
-	<{ [x:=s]e }> = e' <-> substi s x e e'.
-Proof.
-	intros s x e e'. split; intros H.
-	- generalize dependent e'. induction e as [s'| |s'| | | | | |];
-	intros; subst; cbn; auto. destruct (eqb_spec x s'); subst; auto.
-	destruct (eqb_spec x s0); subst; auto.
-	- induction H; cbn; subst; try rewrite eqb_refl;
-	try rewrite (proj2 (eqb_neq _ _)); auto.
-Qed.
-(** [] *)
-
-Fixpoint ty_subst (T : ty) (S : ty) (a : string): ty :=
-	match T with
-	| Ty_Var b =>
-		if String.eqb a b then S else T
-	| Ty_Unit => Ty_Unit
-	| Ty_Prod T1 T2 => Ty_Prod (ty_subst T1 S a) (ty_subst T2 S a)
-	| Ty_Arrow T1 T2 => Ty_Arrow (ty_subst T1 S a) (ty_subst T2 S a)
-	| Ty_Abs b T' =>
-		if String.eqb a b then T else (ty_subst T' S a)
-	end. *)
-
+Fixpoint fill (K : eval_ctxt) (e : tm) : tm :=
+	match K with
+	| HoleCtxt => e
+	| FstCtxt K' => tm_fst (fill K' e)
+	| SndCtxt K' => tm_snd (fill K' e)
+	| PairLCtxt K' e2 => tm_pair (fill K' e ) e2
+	| PairRCtxt K' v Hv => tm_pair v (fill K' e)
+	| AppLCtxt K' e' => tm_app (fill K' e) e'
+	| AppRCtxt K' v Hv => tm_app v (fill K' e)
+	| TAppCtxt K' => tm_tyabs (fill K' e)
+	end.
 
 (* ================================================================= *)
 (** ** Reduction *)
 
+Inductive head_reduction : tm -> tm -> Prop :=
+| Step_fst v1 v2 (Hv1: value v1) (Hv2: value v2) : 
+	head_reduction (tm_fst (tm_pair v1 v2)) v1
+| Step_snd v1 v2 (Hv1: value v1) (Hv2: value v2) : 
+	head_reduction (tm_snd (tm_pair v1 v2)) v2
+| Step_app e v (Hv: value v) :
+	head_reduction (tm_app (tm_abs e) v) (e.[v/])
+| Step_tapp e :
+	head_reduction (tm_tyapp (tm_tyabs e)) e.
+
 Reserved Notation "e '-->' e'" (in custom sysf at level 40).
 
 Inductive step : tm -> tm -> Prop :=
-	| ST_AppAbs : forall e v,
-			value v ->
-			tm_app (tm_abs e) v --> e.[v/]
-	| ST_App1 : forall e1 e1' e2,
-			e1 --> e1' ->
-			<{e1 e2}> --> <{e1' e2}>
-	| ST_App2 : forall v1 e2 e2',
-			value v1 ->
-			e2 --> e2' ->
-			<{v1 e2}> --> <{v1  e2'}>
-	| ST_Pair1 : forall e1 e1' e2,
-			e1 --> e1' ->
-			<{(- e1, e2 -)}> --> <{(- e1', e2 -)}>
-	| ST_Pair2 : forall v1 e2 e2',
-			value v1 ->
-			e2 --> e2' ->
-			<{(- v1, e2 -)}> --> <{(- v1, e2' -)}>
-	| ST_FstPair : forall v1 v2,
-		value v1 ->
-		value v2 ->
-		<{fst (- v1, v2 -)}> --> <{v1}>
-	| ST_SndPair : forall v1 v2,
-		value v1 ->
-		value v2 ->
-		<{snd (- v1, v2 -)}> --> <{v2}>
-	| ST_TyApp : forall e e',
-		e --> e' ->
-		<{e _}> --> <{e' _}>
-	| ST_TyAppTyAbs : forall e,
-		<{(/\ e) _}> --> <{e}>
+| Step_nh K e1 e2 (Hred: head_reduction e1 e2) :
+	(fill K e1) --> (fill K e2)
 
 where "e '-->' e'" := (step e e').
 
@@ -295,7 +198,8 @@ Qed.
 
 Example normalise_fun : normalises (tm_app (tm_abs (tm_var 0)) tm_unit).
 Proof.
-	exists <{()}>. split; eauto.
+	exists <{()}>. split; trivial. apply multi_step with tm_unit; trivial.
+	apply (Step_nh HoleCtxt). apply Step_app. apply v_unit. 
 Qed.
 
 Example stuck : ~ normalises (<{fst () }>).
@@ -303,36 +207,16 @@ Proof.
 	intros H. inversion H as [v [Hv Hstep]].
 	inversion Hstep.
 	- subst. inversion Hv.
-	- inversion H0.
+	- subst. inversion H0; subst. destruct K; inversion H3.
+		+ cbn in H3; subst. inversion Hred.
+		+ destruct K; inversion H4. cbn in H4; subst. inversion Hred.
 Qed.
-
 
 Definition normalises_pred (e : tm) (P : tm -> Prop) :=
 	exists v, value v /\ e -->* v /\ P v.
 
 (* ################################################################# *)
 (** * Typing *)
-
-(* We define a notion of A being free in type T *)
-(* Inductive free : var -> ty -> Prop :=
-	| Free_Var : forall a, free a (Ty_Var a)
-	| Free_Unit : forall a, free a Ty_Unit
-	| Free_Prod1 : forall a T1 T2,
-		free a T1 ->
-		free a (Ty_Prod T1 T2)
-	| Free_Prod2 : forall a T1 T2,
-		free a T2 ->
-		free a (Ty_Prod T1 T2)
-	| Free_Arrow1 : forall a T1 T2,
-		free a T1 ->
-		free a (Ty_Arrow T1 T2)
-	| Free_Arrow2 : forall a T1 T2,
-		free a T2 ->
-		free a (Ty_Arrow T1 T2)
-	| Free_Tabs : forall a b T,
-		a <> b ->
-		free b T ->
-		free b (Ty_Abs T). *)
 
 (* ================================================================= *)
 (** ** Contexts *)
@@ -588,14 +472,16 @@ Proof.
 Qed.
 
 Lemma log_rel_subst_gen xi' xi T T' v :
+	Forall over_vals xi ->
+	Forall over_vals xi' ->
 	lr_val (xi' ++ xi) T.[upn (length xi') (T' .: ids)] v <-> lr_val (xi' ++ (lr_val xi T') :: xi) T v.
 Proof.
-	revert xi' xi v. induction T; simpl; auto; intros; simpl.
+	revert xi' xi v. induction T; simpl; auto; intros xi' xi v''' Hxi_val Hxi_val'; simpl.
 	- rewrite iter_up; destruct lt_dec; simpl.
 	    + rewrite (lookup_app_l xi' xi); auto; rewrite (lookup_app_l _ (lr_val xi T' :: xi)); auto.
 		+ rewrite (lookup_app_r xi'); try lia; auto.
 		  destruct (v - length xi'); subst; simpl.
-		  	* rewrite (log_rel_weaken_gen xi' [] xi). simpl. asimpl. reflexivity.
+		  	* rewrite (log_rel_weaken_gen xi' [] xi). simpl. asimpl. reflexivity. assumption. trivial. assumption.
 			* rewrite (lookup_app_r xi' xi); try rewrite app_length; try lia.
 			  assert (l: length xi' + n0 - length xi' = n0) by lia.
 			  by rewrite l.
@@ -605,7 +491,7 @@ Proof.
 		 	split; auto.
 			symmetry in IHT1. apply IHT1 in H2.
 			symmetry in IHT2. apply IHT2 in H3.
-			auto.
+			all: auto.
 		+ destruct H as [v1 [v2 [H1 [H2 H3]]]].
 			exists v1, v2. split; auto; split.
 			apply IHT1; auto.
@@ -621,7 +507,7 @@ Proof.
 			unfold normalises_pred.
 			exists v''.
 			split; auto; split; auto.
-			apply IHT2; assumption.
+			apply IHT2; auto. all: auto.
 		+ destruct H as [e [H1 H2]].
 			exists e. split; auto.
 			intros v' Hv'. rewrite IHT1 in Hv'.
@@ -631,34 +517,43 @@ Proof.
 			unfold normalises_pred.
 			exists v''.
 			split; auto; split; auto.
-			symmetry in IHT2. apply IHT2; assumption.
+			symmetry in IHT2. apply IHT2; assumption. all: auto.
 	- split; intros H.
 		+ destruct H as [e [H1 H2]].
 			exists e. split; auto.
 			intros P.
 			specialize (H2 P).
 			unfold normalises_pred in H2.
-			destruct H2 as [v' [Hv' [Hv'' Hv''']]].
+			intros Hp_val.
+			destruct H2 as [v' [Hv' [Hv'' Hv''']]]; auto.
 			unfold normalises_pred.
 			exists v'.
 			split; auto; split; auto.
-			apply (IHT (P :: xi')). assumption.
+			apply (IHT (P :: xi')). 
+			* assumption.
+			* apply Forall_cons. auto.
+			* auto.
 		+ destruct H as [e [H1 H2]].
 			exists e. split; auto.
 			intros P.
 			specialize (H2 P).
 			unfold normalises_pred in H2.
-			destruct H2 as [v' [Hv' [Hv'' Hv''']]].
+			intros Hp_val.
+			destruct H2 as [v' [Hv' [Hv'' Hv''']]]; auto.
 			unfold normalises_pred.
 			exists v'.
 			split; auto; split; auto.
-			symmetry in IHT. apply (IHT (P :: xi')). assumption.
+			symmetry in IHT. apply (IHT (P :: xi')).
+			* assumption.
+			* apply Forall_cons. auto.
+			* auto.
 Qed.
 
 Lemma log_rel_subst xi T T' v :
+	Forall over_vals xi ->
 	lr_val xi T.[T'/] v <-> lr_val ((lr_val xi T') :: xi) T v.
 Proof.
-	apply log_rel_subst_gen with (xi' := []) (xi := xi); auto.
+	intro Hxi_val. apply log_rel_subst_gen with (xi' := []) (xi := xi); auto.
 Qed.
 
 Lemma norm_mono e P Q:
@@ -756,7 +651,7 @@ Theorem fundamental_theorem : forall Gamma e vs T xi,
 	log_rel_seq xi Gamma vs ->
 	normalises_pred e.[env_subst vs] (lr_val xi T).
 Proof.
-	intros Gamma e vs T xi H. revert vs xi.
+	intros Gamma e vs T xi Hxi_val H. revert vs xi Hxi_val.
 	induction H; intros vs xi Hlog; simpl.
 	- unfold normalises_pred. exists <{()}>. split; auto.
 	- eapply subst_step_var; eauto.

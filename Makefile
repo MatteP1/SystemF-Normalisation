@@ -1,6 +1,6 @@
 COQMFFLAGS := -Q . SFN
 
-ALLVFILES := SystemF.v
+ALLVFILES := SystemF.v Normalisation.v
 
 build: Makefile.coq
 	$(MAKE) -f Makefile.coq

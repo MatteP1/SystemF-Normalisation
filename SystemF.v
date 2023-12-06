@@ -183,6 +183,8 @@ Inductive head_reduction : tm -> tm -> Prop :=
 
 Reserved Notation "e '-->' e'" (in custom sysf at level 40).
 
+Hint Constructors head_reduction : core.
+
 Inductive step : tm -> tm -> Prop :=
 | Step_nh K e1 e2 (Hred: head_reduction e1 e2) :
 	(fill K e1) --> (fill K e2)
@@ -322,11 +324,11 @@ Reserved Notation "Gamma '|-' e ':' T"
 				e custom sysf, T custom sysf at level 0).
 
 Inductive has_type : varContext -> tm -> ty -> Prop :=
-	| T_Unit : forall Gamma,
-		Gamma |- () : Unit
 	| T_Var : forall (Gamma: varContext) x T1,
 		Gamma !! x = Some T1 ->
 		has_type Gamma (tm_var x) T1
+	| T_Unit : forall Gamma,
+		Gamma |- () : Unit
 	| T_Prod : forall Gamma T1 T2 e1 e2,
 		Gamma |- e1 : T1 ->
 		Gamma |- e2 : T2 ->
@@ -383,8 +385,6 @@ Qed.
 (** * Logical Relations Model for Normalisation *)
 
 Definition predCtxt := list (tm -> Prop).
-
-(* TODO: DEFINE LR *)
 
 Definition over_vals (P : tm -> Prop) : Prop :=
 	forall t, P t -> value t.
@@ -446,6 +446,18 @@ Fixpoint log_rel_seq (xi : predCtxt) (Gamma : varContext) (vs : list tm) : Prop 
 	| t :: ts' =>
 		exists v vs', vs = v :: vs' /\ lr_val xi t v /\ log_rel_seq xi ts' vs'
 	end.
+
+Fixpoint env_subst (vs : list tm) : var → tm :=
+	match vs with
+	| [] => ids
+	| v :: vs' => v .: env_subst vs'
+	end.
+
+Definition log_rel Gamma e T :=
+	forall xi vs,
+	Forall over_vals xi ->
+	log_rel_seq xi Gamma vs ->
+	normalises_pred e.[env_subst vs] (lr_val xi T).
 
 (* ================================================================= *)
 (** ** Helper Lemmas *)
@@ -645,12 +657,6 @@ Qed.
 (* ################################################################# *)
 (** * Fundamental Theorem and Soundness *)
 
-Fixpoint env_subst (vs : list tm) : var → tm :=
-  match vs with
-  | [] => ids
-  | v :: vs' => v .: env_subst vs'
-  end.
-
 Lemma subst_step_var Gamma x T vs xi:
 	Forall over_vals xi ->
 	Gamma !! x = Some T ->
@@ -658,7 +664,7 @@ Lemma subst_step_var Gamma x T vs xi:
 	normalises_pred (env_subst vs x) (lr_val xi T).
 Proof.
 	revert x vs T xi.
-	induction Gamma.
+	induction Gamma as [ | a Gamma IHG].
 	- done.
 	- intros x vs T xi Hxi Hx Hlrs.
 	  destruct x.
@@ -666,101 +672,79 @@ Proof.
 	  	simplify_eq. simpl. exists v. split; auto.
 		eapply lr_val_val; eauto.
 	  * simpl in *. destruct Hlrs as (v & vs' & Hlr & ? & ?).
-	    simplify_eq.
-Admitted.
+	    simplify_eq. cbn. apply IHG; assumption.
+Qed.
 
-Lemma subst_step_pair e1 v1 e2 v2 vs:
-	e1.[env_subst vs] -->* v1 ->
+Lemma ofc: forall e1 e2, 
+	<{ (- e1, e2 -) }> = fill (PairLCtxt HoleCtxt e2) e1.
+Proof. reflexivity. Qed.
+
+Lemma ofc2: forall v1 e2 H,
 	value v1 ->
-	e2.[env_subst vs] -->* v2 ->
-	value v2 ->
-	tm_pair e1.[env_subst vs] e2.[env_subst vs] -->* <{(- v1, v2 -)}>.
-Proof.
-Admitted.
+	<{(- v1, e2 -)}> = fill (PairRCtxt HoleCtxt v1 H) e2.
+Proof. auto. Qed.
 
-Lemma subst_step_fst e v1 v2 vs:
-	e.[env_subst vs] -->* <{(- v1, v2 -)}> ->
-	value v1 ->
-	value v2 ->
-	tm_fst e.[env_subst vs] -->* v1.
-Proof.
-Admitted.
+Lemma ofc3: forall e,
+	<{ fst e }> = fill (FstCtxt HoleCtxt) e.
+Proof. auto. Qed.
 
-Lemma subst_step_snd e v1 v2 vs:
-	e.[env_subst vs] -->* <{(- v1, v2 -)}> ->
+Lemma ofc4: forall v1 v2,
 	value v1 ->
 	value v2 ->
-	tm_snd e.[env_subst vs] -->* v2.
-Proof.
-Admitted.
+	<{ fst (- v1, v2 -) }> = fill HoleCtxt <{fst (- v1, v2 -)}>.
+Proof. auto. Qed.
 
-Lemma subst_step_app e1 e e2 v vs v':
-	e1.[env_subst vs] -->* tm_abs e ->
-	e2.[env_subst vs] -->* v ->
+Lemma ofc_v: forall v,
 	value v ->
-	e.[v/] -->* v' ->
-	value v' ->
-	tm_app e1.[env_subst vs] e2.[env_subst vs] -->* v'.
-Proof.
-Admitted.
+	<{ v }> = fill HoleCtxt <{ v }>.
+Proof. auto. Qed.
 
-Lemma subst_step_tapp e b v0 vs:
-	e.[env_subst vs] -->* tm_tyabs b ->
-	b -->* v0 ->
-	value v0 ->
-	tm_tyapp e.[env_subst vs] -->* v0.
-Proof.
-Admitted.
+Lemma ofc3_2: forall e,
+	<{ snd e }> = fill (SndCtxt HoleCtxt) e.
+Proof. auto. Qed.
 
-Theorem fundamental_theorem : forall Gamma e vs T xi,
-	Forall over_vals xi ->
+Lemma ofc4_2: forall v1 v2,
+	value v1 ->
+	value v2 ->
+	<{ snd (- v1, v2 -) }> = fill HoleCtxt <{ snd (- v1, v2 -)}>.
+Proof. auto. Qed.
+
+Theorem fundamental_theorem : forall Gamma e T,
 	Gamma |- e : T ->
-	log_rel_seq xi Gamma vs ->
-	normalises_pred e.[env_subst vs] (lr_val xi T).
-Proof.
-	intros Gamma e vs T xi Hxi_val H. revert vs xi Hxi_val.
-	induction H; intros vs xi Hlog; simpl.
-	- unfold normalises_pred. exists <{()}>. split; auto.
-	- eapply subst_step_var; eauto.
-	- destruct (IHhas_type1 vs xi Hlog) as [v1 [Hv1 [Hv1' Hv1'']]].
-	  destruct (IHhas_type2 vs xi Hlog) as [v2 [Hv2 [Hv2' Hv2'']]].
-	  unfold normalises_pred.
-	  exists <{(- v1, v2 -)}>; repeat (auto; split).
-	  { eapply subst_step_pair; eauto. }
-	  exists v1, v2. repeat (split; auto).
-	- destruct (IHhas_type vs xi Hlog) as [v [Hv [Hv' Hv'']]].
-	  inversion Hv'' as [v1 [v2 [Hv_eq [Hv1 Hv2]]]]; subst.
-	  exists v1. inversion Hv; subst. repeat (split; auto).
-	  eapply subst_step_fst; eauto.
-	- destruct (IHhas_type vs xi Hlog) as [v [Hv [Hv' Hv'']]].
-	  inversion Hv'' as [v1 [v2 [Hv_eq [Hv1 Hv2]]]]; subst.
-	  exists v2. inversion Hv; subst. repeat (split; auto).
-	  eapply subst_step_snd; eauto.
-	- apply norm_val; auto.
-	  exists e.[up (env_subst vs)]; split; auto.
-	  intros v Hv.
-	  assert (Hsubst: e.[up (env_subst vs)].[v/] = e.[env_subst (v :: vs)]) by by asimpl.
-	  rewrite Hsubst. apply IHhas_type. simpl; eauto.
-	- destruct (IHhas_type1 vs xi Hlog) as [v1 [Hv1 [Hv1' Hv1'']]].
-	  destruct (IHhas_type2 vs xi Hlog) as [v2 [Hv2 [Hv2' Hv2'']]].
-	  inversion Hv1'' as [e [He He']].
-	  apply He' in Hv2''.
-	  unfold normalises_pred in Hv2''.
-	  destruct Hv2'' as [v' [Hv' [Hv'' Hv''']]]; subst.
-	  exists v'. repeat (split; auto). subst.
-	  eapply subst_step_app; eauto.
-	- apply norm_val; auto.
-	  exists e.[env_subst vs]. split; auto.
-	  intros P.
-	  apply IHhas_type. simpl.
-	  by apply log_rel_seq_weaken.
-	- destruct (IHhas_type vs xi Hlog) as [v [Hv [Hv' Hv'']]].
-	  inversion Hv'' as [b [Hb Hb']]; subst.
-	  destruct (Hb' (lr_val xi T')) as [v0 [Hv0' [Hv0'' Hv0''']]].
-	  apply norm_mono with (P := lr_val (lr_val xi T' :: xi) T).
-	  apply log_rel_subst.
-	  exists v0. repeat (split; auto).
-	  apply subst_step_tapp with (b := b); auto.
+	log_rel Gamma e T.
+Proof with auto.
+	unfold log_rel.
+	intros Gamma e T HGeT xi vs Hxi_val. revert vs xi Hxi_val.
+	induction HGeT; intros vs xi Hxi_val Hlrs_xi_G_vs.
+	- apply subst_step_var with Gamma; assumption.
+	- asimpl. exists tm_unit; done.
+	- asimpl. rewrite ofc. apply norm_bind with (lr_val xi T1).
+		split. apply IHHGeT1...
+		intros v1 (Hv1val & Hlrv_v1). cbn.
+		rewrite ofc2 with _ _ Hv1val...
+		apply norm_bind with (lr_val xi T2).
+		split. apply IHHGeT2...
+		intros v2 (Hv2val & Hlrv_v2).
+		apply norm_val; cbn; auto.
+		exists v1, v2...
+	- asimpl. rewrite ofc3. apply norm_bind with (lr_val xi (Ty_Prod T1 T2)).
+		split. apply IHHGeT...
+		intros v (Hvval & Hlrv_v).
+		destruct Hlrv_v as (v1 & v2 & Heq & Hlrv_v1 & Hlrv_v2).
+		subst. inversion Hvval; subst. apply norm_step with v1. split; cbn.
+		+ rewrite ofc4, ofc_v...
+		+ apply norm_val...
+	- asimpl. rewrite ofc3_2. apply norm_bind with (lr_val xi (Ty_Prod T1 T2)).
+		split. apply IHHGeT...
+		intros v (Hvval & Hlrv_v).
+		destruct Hlrv_v as (v1 & v2 & Heq & Hlrv_v1 & Hlrv_v2).
+		subst. inversion Hvval; subst. apply norm_step with v2. split; cbn.
+		+ rewrite ofc4_2, ofc_v...
+		+ apply norm_val...
+	- 
+	-
+	-
+	-
 Qed.
 
 Theorem normalisation: forall e T,

@@ -1,13 +1,14 @@
 (** * System F *)
 
-(* NOTE: THE FOLLOWING DEVELOPMENT IS AN EXTENSION OF stlc.v FROM PROGRAMMING LANGUAGE FOUNDATIONS. *)
-
 Set Warnings "-notation-overridden,-parsing,-deprecated-hint-without-locality".
 From Coq Require Import Strings.String.
 Require Import List.
 Import ListNotations.
 From stdpp Require Import gmap.
 From Autosubst Require Export Autosubst.
+
+(* NOTE: The following two definition were taken from Smallstep.v 
+	from software-foundations. *)
 
 (* Relation *)
 Definition relation (X : Type) := X -> X -> Prop.
@@ -19,6 +20,18 @@ Inductive multi {X : Type} (R : relation X) : relation X :=
 	R x y ->
 						multi R y z ->
 						multi R x z.
+
+Lemma multi_trans : forall (X: Type) (R: relation X) a b c,
+	multi R a b ->
+	multi R b c ->
+	multi R a c.
+Proof.
+	intros X R a b c Hab. 
+	induction Hab as [d | a a' b Haa' Ha'b IH].
+	- trivial.
+	- intros Hbc. apply IH in Hbc as Ha'c. 
+		apply multi_step with a'; assumption.
+Qed.
 
 Hint Constructors multi : core.
 
@@ -54,22 +67,20 @@ Inductive tm : Type :=
 	| tm_tyabs : tm -> tm
 	| tm_tyapp : tm -> tm.
 
-
 Global Instance Ids_expr : Ids tm. derive. Defined.
 Global Instance Rename_expr : Rename tm. derive. Defined.
 Global Instance Subst_expr : Subst tm. derive. Defined.
 Global Instance SubstLemmas_expr : SubstLemmas tm. derive. Qed.
 
+
+(* ================================================================= *)
+(** ** Notation *)
 Declare Custom Entry sysf.
 Notation "<{ e }>" := e (e custom sysf at level 99).
 Notation "( x )" := x (in custom sysf, x at level 99).
 Notation "x" := x (in custom sysf at level 0, x constr at level 0).
 Notation "S -> T" := (Ty_Arrow S T) (in custom sysf at level 50, right associativity).
 Notation "x y" := (tm_app x y) (in custom sysf at level 1, left associativity).
-(* Notation "\ x , y" :=
-	(tm_abs x y) (in custom sysf at level 90, x at level 99,
-						y custom sysf at level 99,
-						left associativity). *)
 
 Coercion tm_var : var >-> tm.
 
@@ -153,84 +164,8 @@ Fixpoint fill (K : eval_ctxt) (e : tm) : tm :=
 	| TAppCtxt K' => tm_tyapp (fill K' e)
 	end.
 
-Fixpoint compose (K K' : eval_ctxt) : eval_ctxt :=
-	match K with
-	| HoleCtxt => K'
-	| FstCtxt K'' => FstCtxt (compose K'' K')
-	| SndCtxt K'' => SndCtxt (compose K'' K')
-	| PairLCtxt K'' e2 => PairLCtxt (compose K'' K') e2
-	| PairRCtxt K'' v Hv => PairRCtxt (compose K'' K') v Hv
-	| AppLCtxt K'' e' => AppLCtxt (compose K'' K') e'
-	| AppRCtxt K'' v Hv => AppRCtxt (compose K'' K') v Hv
-	| TAppCtxt K'' => TAppCtxt (compose K'' K')
-	end.
-
-(* ================================================================= *)
-(** ** Reduction *)
-
-Inductive head_reduction : tm -> tm -> Prop :=
-| Step_fst v1 v2 (Hv1: value v1) (Hv2: value v2) : 
-	head_reduction (tm_fst (tm_pair v1 v2)) v1
-| Step_snd v1 v2 (Hv1: value v1) (Hv2: value v2) : 
-	head_reduction (tm_snd (tm_pair v1 v2)) v2
-| Step_app e v (Hv: value v) :
-	head_reduction (tm_app (tm_abs e) v) (e.[v/])
-| Step_tapp e :
-	head_reduction (tm_tyapp (tm_tyabs e)) e.
-
-Reserved Notation "e '-->' e'" (in custom sysf at level 40).
-
-Hint Constructors head_reduction : core.
-
-Inductive step : tm -> tm -> Prop :=
-| Step_nh K e1 e2 (Hred: head_reduction e1 e2) :
-	(fill K e1) --> (fill K e2)
-
-where "e '-->' e'" := (step e e').
-
-Hint Constructors step : core.
-
-Notation multistep := (multi step).
-Notation "e1 '-->*' e2" := (multistep e1 e2) (at level 40).
-
-Lemma step_trans : forall e1 e2 e3,
-	e1 -->* e2 ->
-	e2 -->* e3 ->
-	e1 -->* e3.
-Proof.
-	intros e1 e2 e3 He1e2. 
-	induction He1e2 as [e | e e' e'' Hee' He'e'' IH].
-	- trivial.
-	- intros He''e3. apply IH in He''e3 as He'e3. 
-		apply multi_step with e'; assumption.
-Qed.
-
-Lemma fill_compose: forall e K K',
-	fill K (fill K' e) = fill (compose K K') e.
-Proof.
-	intros e K. revert e. induction K; intros; cbn; try rewrite IHK; auto.
-Qed.
-
-Lemma eval_ctxt_step: forall e e' K,
-	e --> e' ->
-	fill K e --> fill K e'.
-Proof.
-	intros e e' K Hee'.
-	inversion Hee' as [K' e1 e2 Hred HK'e1 HK'e2].
-	do 2 (rewrite fill_compose). apply Step_nh. assumption.
-Qed.
-
-Lemma eval_ctxt_steps: forall e e' K,
-	e -->* e' ->
-	fill K e -->* fill K e'.
-Proof.
-	intros e e' K Hee'. induction Hee'.
-	- apply multi_refl.
-	- apply multi_step with (fill K y0).
-		+ apply eval_ctxt_step. assumption.
-		+ assumption.
-Qed.
-
+(* The following lemmas follow directly from the defintion of fill.
+	They are used to rewrite expressions as plugged contexts. *)
 Lemma eval_ctxt_hole: forall e,
 	<{ e }> = fill HoleCtxt <{ e }>.
 Proof. auto. Qed.
@@ -262,6 +197,82 @@ Proof. auto. Qed.
 Lemma eval_ctxt_tapp: forall e,
 	tm_tyapp e = fill (TAppCtxt HoleCtxt) e.
 Proof. auto. Qed.
+
+(* We can compose two contexts K and K' as follows: *)
+Fixpoint compose (K K' : eval_ctxt) : eval_ctxt :=
+	match K with
+	| HoleCtxt => K'
+	| FstCtxt K'' => FstCtxt (compose K'' K')
+	| SndCtxt K'' => SndCtxt (compose K'' K')
+	| PairLCtxt K'' e2 => PairLCtxt (compose K'' K') e2
+	| PairRCtxt K'' v Hv => PairRCtxt (compose K'' K') v Hv
+	| AppLCtxt K'' e' => AppLCtxt (compose K'' K') e'
+	| AppRCtxt K'' v Hv => AppRCtxt (compose K'' K') v Hv
+	| TAppCtxt K'' => TAppCtxt (compose K'' K')
+	end.
+
+Lemma fill_compose: forall e K K',
+	fill K (fill K' e) = fill (compose K K') e.
+Proof.
+	intros e K. revert e. induction K; intros; cbn; try rewrite IHK; auto.
+Qed.
+
+(* ================================================================= *)
+(** ** Reduction *)
+
+Inductive head_reduction : tm -> tm -> Prop :=
+| Step_fst v1 v2 (Hv1: value v1) (Hv2: value v2) : 
+	head_reduction (tm_fst (tm_pair v1 v2)) v1
+| Step_snd v1 v2 (Hv1: value v1) (Hv2: value v2) : 
+	head_reduction (tm_snd (tm_pair v1 v2)) v2
+| Step_app e v (Hv: value v) :
+	head_reduction (tm_app (tm_abs e) v) (e.[v/])
+| Step_tapp e :
+	head_reduction (tm_tyapp (tm_tyabs e)) e.
+
+Hint Constructors head_reduction : core.
+
+Reserved Notation "e '-->' e'" (in custom sysf at level 40).
+
+Inductive step : tm -> tm -> Prop :=
+| Step_nh K e1 e2 (Hred: head_reduction e1 e2) :
+	(fill K e1) --> (fill K e2)
+
+where "e '-->' e'" := (step e e').
+
+Hint Constructors step : core.
+
+Notation multistep := (multi step).
+Notation "e1 '-->*' e2" := (multistep e1 e2) (at level 40).
+
+Lemma step_trans : forall e1 e2 e3,
+	e1 -->* e2 ->
+	e2 -->* e3 ->
+	e1 -->* e3.
+Proof. apply multi_trans. Qed.
+
+Lemma eval_ctxt_step: forall e e' K,
+	e --> e' ->
+	fill K e --> fill K e'.
+Proof.
+	intros e e' K Hee'.
+	inversion Hee' as [K' e1 e2 Hred HK'e1 HK'e2].
+	do 2 (rewrite fill_compose). apply Step_nh. assumption.
+Qed.
+
+Lemma eval_ctxt_steps: forall e e' K,
+	e -->* e' ->
+	fill K e -->* fill K e'.
+Proof.
+	intros e e' K Hee'. induction Hee'.
+	- apply multi_refl.
+	- apply multi_step with (fill K y0).
+		+ apply eval_ctxt_step. assumption.
+		+ assumption.
+Qed.
+
+(* ================================================================= *)
+(** ** Normalises *)
 
 Definition normalises (e : tm) := exists v, value v /\ e -->* v.
 
@@ -340,17 +351,9 @@ Qed.
 (** * Typing *)
 
 (* ================================================================= *)
-(** ** Contexts *)
+(** ** The Typing Relation *)
 
 Definition varContext := list ty.
-(* Definition typeCtxt := list ty. *)
-
-(* Definition free_varctxt (a : string) (Gamma : varContext) : Prop :=
-	exists x T,
-		Gamma x = Some T /\
-		free a T. *)
-
-(* ================================================================= *)
 
 Reserved Notation "Gamma '|-' e ':' T"
 			(at level 101,
@@ -491,6 +494,10 @@ Definition log_rel Gamma e T :=
 	Forall over_vals xi ->
 	log_rel_seq xi Gamma vs ->
 	normalises_pred e.[env_subst vs] (lr_val xi T).
+
+Notation "Gamma '|=' e ':' T" := (log_rel Gamma e T)
+	(at level 101,
+		e custom sysf, T custom sysf at level 0).
 
 (* ================================================================= *)
 (** ** Helper Lemmas *)
@@ -710,7 +717,7 @@ Qed.
 
 Theorem fundamental_theorem : forall Gamma e T,
 	Gamma |- e : T ->
-	log_rel Gamma e T.
+	Gamma |= e : T.
 Proof with auto.
 	unfold log_rel.
 	intros Gamma e T HGeT xi vs Hxi_val. revert vs xi Hxi_val.

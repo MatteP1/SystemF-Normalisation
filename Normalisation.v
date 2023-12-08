@@ -468,3 +468,15 @@ Proof.
 	specialize HT with [] []. asimpl in HT. destruct HT as (v & Hvval & Hev & Hlrv_v).
 	1,2: done. exists v. split; done.
 Qed.
+
+Theorem normalisation_alt: forall e T,
+	[] |- e : T ->
+	exists e', e -->* e' /\ ~(exists e'', e' --> e'').
+Proof.
+	intros e T HEeT. apply normalisation in HEeT as (v & Hv & Hev).
+	exists v. split.
+	- assumption.
+	- intros [e'' Hcontra]. apply value_not_step with v.
+		+ assumption.
+		+ exists e''. assumption.
+Qed.

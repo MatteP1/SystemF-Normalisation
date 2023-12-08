@@ -271,6 +271,45 @@ Proof.
 		+ assumption.
 Qed.
 
+(* Values cannot take a head-step *)
+Theorem values_not_hstep: forall v,
+	value v ->
+	~ exists e, head_reduction v e.
+Proof.
+	intros v Hvval [e Hve]. inversion Hvval; subst; inversion Hve.
+Qed.
+
+(* If a value v can be written as v = K[v'], then v' must be a value. *)
+Lemma eval_ctxt_sub_values: forall v K v',
+	value v ->
+	v = fill K v' ->
+	value v'.
+Proof.
+	intros v K v' Hvval Heq. subst. induction K; intros; subst; cbn in *.
+	
+	(* When K = [] it holds trivially *) 
+	1: assumption.
+
+	(* When K = fst K',  K = snd K', K = K' e, K = v K', or K = K' _
+		then we assume that K[v'] is a value, which is of course false. *)
+	1,2,5,6,7: inversion Hvval.
+
+	(* When K = (K', e) or K = (v, K'), then it follows by the 
+		induction hypothesis *)
+	all: inversion Hvval; subst; auto.
+Qed.
+
+(* Values cannot take a step. *)
+Theorem value_not_step: forall v,
+	value v ->
+	~ exists e, v --> e.
+Proof.
+	intros v Hvval [e Hve]. inversion Hve as [K e1 e2 Hred Heq1 Heq2].
+	subst. assert (He1val: value e1). 
+		{ apply (eval_ctxt_sub_values (fill K e1) K e1); easy. }
+	apply (values_not_hstep e1); eauto.
+Qed.
+
 (* ################################################################# *)
 (** * Typing *)
 

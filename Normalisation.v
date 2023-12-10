@@ -132,18 +132,18 @@ Proof.
 	  apply Forall_app in Hxi. destruct Hxi as [_ Hxi].
 	  inversion Hxi as [|? ? H1 H2]; subst.
 	  apply H1. assumption.
-	- intros xi v Hxi Hlr. simpl in Hlr. subst. auto.
+	- intros xi v Hxi Hlr. simpl in Hlr. subst. constructor.
 	- intros xi v Hxi Hlr. simpl in Hlr.
 	  destruct Hlr as [v1 [v2 [H1 [H2 H3]]]].
 	  apply IHT1 in H2; auto.
 	  apply IHT2 in H3; auto.
-	  subst; eauto.
+	  subst. auto.
 	- intros xi v Hxi Hlr. simpl in Hlr.
 	  destruct Hlr as [e [H1 H2]].
-	  subst. eauto.
+	  subst. auto.
 	- intros xi v Hxi Hlr. simpl in Hlr.
 	  destruct Hlr as [e [H1 H2]].
-	  subst. eauto.
+	  subst. auto.
 Qed.
 
 Fixpoint log_rel_seq (xi : predCtxt) (Gamma : varContext) (vs : list tm) : Prop :=
@@ -194,10 +194,10 @@ Lemma log_rel_weaken_gen xi xi1 xi2 v T :
 	lr_val (xi1 ++ xi2) T v <->
 	lr_val (xi1 ++ xi ++ xi2) T.[upn (length xi1) (ren (+ length xi))] v.
 Proof.
-	revert xi xi1 xi2 v. induction T; simpl; auto; intros xi xi1 xi2; simpl.
+	revert xi xi1 xi2 v. induction T; intros xi xi1 xi2; cbn.
 	- intros v0 Hxi Hxi1 Hxi2. split.
 		+ rewrite iter_up; destruct (lt_dec v (length xi1)); simpl.
-			* rewrite (lookup_app_l _ xi2); auto;
+			* rewrite (lookup_app_l _ xi2); auto.
 			  rewrite (lookup_app_l _ (xi ++ xi2)); auto.
 			* rewrite (lookup_app_r xi1); try lia; auto.
 			  intro. rewrite app_assoc.
@@ -210,6 +210,7 @@ Proof.
 			  assert (l: length xi1 + (length xi + (v - length xi1)) - (length xi1 + length xi) = v - length xi1) by lia.
 			  rewrite l.
 			  rewrite (lookup_app_r xi1); try lia; auto.
+	- reflexivity.
 	- intros v0 Hxi Hxi1 Hxi2. split; intro H.
 		+ destruct H as [v1 [v2 [H1 [H2 H3]]]].
 			exists v1, v2. 
@@ -269,16 +270,17 @@ Lemma log_rel_seq_weaken xi P Gamma vs :
 	over_vals P ->
 	log_rel_seq xi Gamma vs <-> log_rel_seq (P :: xi) (subst (ren (+1)) <$> Gamma) vs.
 Proof.
-	revert xi vs. induction Gamma; simpl; auto; intros xi vs Hxi Hp; simpl.
-	split; intros.
-	- destruct H as [v [vs' [H1 [H2 H3]]]].
-		exists v, vs'. repeat (split; auto).
-		eapply log_rel_weaken in H2; eauto.
-		by apply IHGamma.
-	- destruct H as [v [vs' [H1 [H2 H3]]]].
-		exists v, vs'. repeat (split; auto).
-		eapply log_rel_weaken; eauto.
-		by apply IHGamma.
+	revert xi vs. induction Gamma; intros xi vs Hxi Hp; cbn.
+	- reflexivity.
+	- split; intros H.
+		+ destruct H as [v [vs' [H1 [H2 H3]]]].
+			exists v, vs'. repeat (split; auto).
+			eapply log_rel_weaken in H2; eauto.
+			by apply IHGamma.
+		+ destruct H as [v [vs' [H1 [H2 H3]]]].
+			exists v, vs'. repeat (split; auto).
+			eapply log_rel_weaken; eauto.
+			by apply IHGamma.
 Qed.
 
 Lemma log_rel_subst_gen xi' xi T T' v :
@@ -286,15 +288,16 @@ Lemma log_rel_subst_gen xi' xi T T' v :
 	Forall over_vals xi' ->
 	lr_val (xi' ++ xi) T.[upn (length xi') (T' .: ids)] v <-> lr_val (xi' ++ (lr_val xi T') :: xi) T v.
 Proof.
-	revert xi' xi v. induction T; simpl; auto; intros xi' xi v''' Hxi_val Hxi_val'; simpl.
+	revert xi' xi v. induction T; intros xi' xi v''' Hxi_val Hxi_val'; cbn.
 	- rewrite iter_up; destruct lt_dec; simpl.
-	    + rewrite (lookup_app_l xi' xi); auto; rewrite (lookup_app_l _ (lr_val xi T' :: xi)); auto.
-		+ rewrite (lookup_app_r xi'); try lia; auto.
+	    + rewrite (lookup_app_l xi' xi); auto. rewrite (lookup_app_l _ (lr_val xi T' :: xi)); auto.
+		+ rewrite (lookup_app_r xi'); try lia.
 		  destruct (v - length xi'); subst; simpl.
-		  	* rewrite (log_rel_weaken_gen xi' [] xi). simpl. asimpl. reflexivity. assumption. trivial. assumption.
+		  	* rewrite (log_rel_weaken_gen xi' [] xi); asimpl. all: auto.
 			* rewrite (lookup_app_r xi' xi); try rewrite app_length; try lia.
 			  assert (l: length xi' + n0 - length xi' = n0) by lia.
 			  by rewrite l.
+	- reflexivity.
 	- split; intros H.
 		+ destruct H as [v1 [v2 [H1 [H2 H3]]]].
 			exists v1, v2. 
@@ -304,30 +307,30 @@ Proof.
 			all: auto.
 		+ destruct H as [v1 [v2 [H1 [H2 H3]]]].
 			exists v1, v2. split; auto; split.
-			apply IHT1; auto.
-			apply IHT2; auto.
+			* apply IHT1; auto.
+			* apply IHT2; auto.
 	- split; intros H.
 		+ destruct H as [e [H1 H2]].
 			exists e. split; auto.
 			intros v' Hv'.
-			apply IHT1 in Hv'.
+			apply IHT1 in Hv'; auto.
 			apply H2 in Hv'.
 			unfold normalises_pred in Hv'.
 			destruct Hv' as [v'' [Hv'' [Hv''' Hv'''']]].
 			unfold normalises_pred.
 			exists v''.
 			split; auto; split; auto.
-			apply IHT2; auto. all: auto.
+			apply IHT2; auto.
 		+ destruct H as [e [H1 H2]].
 			exists e. split; auto.
-			intros v' Hv'. rewrite IHT1 in Hv'.
+			intros v' Hv'. rewrite IHT1 in Hv'; auto.
 			apply H2 in Hv'.
 			unfold normalises_pred in Hv'.
 			destruct Hv' as [v'' [Hv'' [Hv''' Hv'''']]].
 			unfold normalises_pred.
 			exists v''.
 			split; auto; split; auto.
-			symmetry in IHT2. apply IHT2; assumption. all: auto.
+			symmetry in IHT2. apply IHT2; assumption.
 	- split; intros H.
 		+ destruct H as [e [H1 H2]].
 			exists e. split; auto.
